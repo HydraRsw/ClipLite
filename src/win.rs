@@ -199,6 +199,7 @@ const ID_OPEN: usize = 31;
 const ID_EDIT: usize = 32;
 const ID_RELOAD: usize = 33;
 const ID_LOG: usize = 34;
+const ID_LIBRARY: usize = 35;
 const ID_AUTOSTART: usize = 40;
 const ID_QUIT: usize = 99;
 
@@ -305,6 +306,35 @@ pub fn install_cs2_cfg(port: u16) {
             if std::fs::read_to_string(&f).ok().as_deref() != Some(text.as_str()) && std::fs::write(&f, &text).is_ok() {
                 log!("CS2: integración instalada en {} (reinicia CS2 si estaba abierto)", f.display());
             }
+        }
+    }
+}
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~/:".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Abre el reproductor como ventana de aplicación (Edge en modo app, incluido en Windows);
+/// si no está disponible, con el navegador predeterminado.
+pub fn open_player(html: &Path, session: Option<&str>) {
+    let mut url = format!("file:///{}", url_encode(&html.to_string_lossy().replace('\\', "/")));
+    if let Some(id) = session {
+        url.push_str("#s=");
+        url.push_str(&url_encode(id));
+    }
+    unsafe {
+        let args = w(&format!("--app=\"{url}\" --window-size=1440,920"));
+        let r = ShellExecuteW(0, w("open").as_ptr(), w("msedge.exe").as_ptr(), args.as_ptr(), null(), 1);
+        if r <= 32 {
+            ShellExecuteW(0, w("open").as_ptr(), wp(html).as_ptr(), null(), null(), 1);
         }
     }
 }
@@ -660,6 +690,7 @@ unsafe fn show_menu(hwnd: H) {
     add(MF_SEPARATOR, 0, "");
     add(0, ID_TOGGLE, &if v.recording { format!("Detener grabación\t{}", v.hk_rec) } else { format!("Empezar a grabar ahora\t{}", v.hk_rec) });
     add(if v.recording { 0 } else { MF_GRAYED }, ID_CLIP, &format!("Guardar clip\t{}", v.hk_clip));
+    add(0, ID_LIBRARY, "Ver mis partidas y clips");
     add(MF_SEPARATOR, 0, "");
     add(check(v.mode == Mode::Completa), ID_MODE_FULL, "Grabar la partida completa");
     add(check(v.mode == Mode::Momentos), ID_MODE_MOM, "Solo momentos importantes");
@@ -687,6 +718,7 @@ unsafe fn show_menu(hwnd: H) {
     match id as usize {
         ID_TOGGLE => send(Cmd::ToggleRecord),
         ID_CLIP => send(Cmd::SaveClip),
+        ID_LIBRARY => send(Cmd::OpenLibrary),
         ID_MODE_FULL => send(Cmd::SetMode(Mode::Completa)),
         ID_MODE_MOM => send(Cmd::SetMode(Mode::Momentos)),
         ID_FOLDER => {
@@ -728,6 +760,9 @@ unsafe extern "system" fn wndproc(hwnd: H, msg: u32, wparam: usize, lparam: isiz
             let ev = (lparam as u32) & 0xFFFF;
             if ev == WM_RBUTTONUP || ev == WM_LBUTTONUP {
                 show_menu(hwnd);
+            } else if ev == 0x0203 {
+                // doble clic: abrir el reproductor
+                send(Cmd::OpenLibrary);
             }
             0
         }

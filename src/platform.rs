@@ -1,6 +1,7 @@
 // Punto único donde se separa lo específico de Windows de lo genérico.
 // En Windows: captura real (Desktop Duplication + WASAPI).
 // En otros sistemas: fuentes de prueba para poder probar toda la lógica de grabación y clips.
+#![allow(unused_imports)]
 use crate::audio::Capture;
 use crate::config::Config;
 use std::path::{Path, PathBuf};
@@ -25,7 +26,7 @@ pub fn probe_input(cfg: &Config) -> Vec<String> {
     vec!["-f".into(), "lavfi".into(), "-i".into(), format!("ddagrab=output_idx={}:framerate=10", cfg.monitor)]
 }
 #[cfg(windows)]
-pub use crate::win::{config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_audio};
+pub use crate::win::{config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_audio, open_player};
 
 // ---------------------------------------------------------------- Pruebas (Linux/macOS)
 #[cfg(not(windows))]
@@ -62,6 +63,10 @@ pub fn install_cs2_cfg(_port: u16) {}
 #[cfg(not(windows))]
 pub fn lol_fetcher() -> Option<Fetcher> {
     None
+}
+#[cfg(not(windows))]
+pub fn open_player(html: &Path, session: Option<&str>) {
+    log!("Abrir reproductor: {}#s={}", html.display(), session.unwrap_or(""));
 }
 
 /// Generador de prueba: tono de 440 Hz con un hueco de silencio (sin datos) entre los segundos 3 y 5,

@@ -41,6 +41,70 @@ impl Json {
     }
 }
 
+impl Json {
+    pub fn str(s: &str) -> Json {
+        Json::Str(s.to_string())
+    }
+    /// Serializa a texto JSON. '<' se escapa para poder incrustarlo en un <script>.
+    pub fn dump(&self, out: &mut String) {
+        match self {
+            Json::Null => out.push_str("null"),
+            Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Json::Num(n) if n.is_finite() => {
+                if n.fract() == 0.0 && n.abs() < 1e15 {
+                    out.push_str(&format!("{}", *n as i64));
+                } else {
+                    out.push_str(&format!("{:.3}", n));
+                }
+            }
+            Json::Num(_) => out.push_str("null"),
+            Json::Str(s) => {
+                out.push('"');
+                for c in s.chars() {
+                    match c {
+                        '"' => out.push_str("\\\""),
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        '<' => out.push_str("\\u003c"),
+                        c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                        c => out.push(c),
+                    }
+                }
+                out.push('"');
+            }
+            Json::Arr(v) => {
+                out.push('[');
+                for (i, x) in v.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    x.dump(out);
+                }
+                out.push(']');
+            }
+            Json::Obj(v) => {
+                out.push('{');
+                for (i, (k, x)) in v.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    Json::Str(k.clone()).dump(out);
+                    out.push(':');
+                    x.dump(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+    pub fn to_text(&self) -> String {
+        let mut s = String::new();
+        self.dump(&mut s);
+        s
+    }
+}
+
 pub fn parse(s: &str) -> Option<Json> {
     let mut p = P { b: s.as_bytes(), i: 0 };
     let v = p.value(0)?;
@@ -200,5 +264,10 @@ mod tests {
         assert_eq!(ev.get("t").unwrap().as_f64(), Some(-150.0));
         assert_eq!(j.get("e").unwrap().as_str(), Some("😀"));
         assert!(super::parse("{\"a\":").is_none());
+        let back = super::parse(&j.to_text()).unwrap();
+        assert_eq!(back.get("e").unwrap().as_str(), Some("😀"));
+        let t = super::Json::str("a\"b\\c</script>\n").to_text();
+        assert_eq!(t, r#""a\"b\\c\u003c/script>\n""#);
+        assert_eq!(super::parse(&t).unwrap().as_str(), Some("a\"b\\c</script>\n"));
     }
 }

@@ -68,6 +68,9 @@ pub fn run() {
     println!("--- atajo de clip manual");
     tx.send(Cmd::SaveClip).unwrap();
     sleep(2.0);
+    println!("--- Windows le quita la pantalla a la captura (887a0026): se mata ffmpeg");
+    let _ = std::process::Command::new("pkill").args(["-f", "testsrc2=size=1280"]).status();
+    sleep(2.0);
     println!("--- CS2 envía estado (0 kills) y luego 1 kill");
     for k in [0, 1] {
         let body = format!(

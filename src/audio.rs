@@ -40,9 +40,11 @@ pub trait Capture {
     fn read(&mut self, out: &mut Vec<u8>) -> Result<(), String>;
 }
 
+pub type Clock = Arc<std::sync::Mutex<Option<Instant>>>;
+
 pub struct AudioThread {
     stop: Arc<AtomicBool>,
-    stdin_tx: Option<SyncSender<ChildStdin>>,
+    stdin_tx: Option<SyncSender<(ChildStdin, Clock)>>,
     th: Option<JoinHandle<()>>,
 }
 
@@ -50,7 +52,7 @@ impl AudioThread {
     /// Abre el dispositivo en su propio hilo y devuelve el formato para configurar FFmpeg.
     pub fn start() -> Result<(AudioThread, AudioFormat), String> {
         let (fmt_tx, fmt_rx) = sync_channel::<Result<AudioFormat, String>>(1);
-        let (in_tx, in_rx) = sync_channel::<ChildStdin>(1);
+        let (in_tx, in_rx) = sync_channel::<(ChildStdin, Clock)>(1);
         let stop = Arc::new(AtomicBool::new(false));
         let stop2 = stop.clone();
         let th = std::thread::Builder::new()
@@ -65,8 +67,8 @@ impl AudioThread {
                 };
                 let fmt = cap.format();
                 let _ = fmt_tx.send(Ok(fmt));
-                if let Ok(stdin) = in_rx.recv() {
-                    pump(cap, stdin, fmt, &stop2);
+                if let Ok((stdin, clock)) = in_rx.recv() {
+                    pump(cap, stdin, fmt, &stop2, clock);
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -80,9 +82,10 @@ impl AudioThread {
         }
     }
 
-    pub fn attach(&mut self, stdin: ChildStdin) {
+    /// `clock` = instante real del fotograma 0 del vídeo (lo mide la grabadora).
+    pub fn attach(&mut self, stdin: ChildStdin, clock: Clock) {
         if let Some(tx) = self.stdin_tx.take() {
-            let _ = tx.send(stdin);
+            let _ = tx.send((stdin, clock));
         }
     }
 
@@ -96,13 +99,21 @@ impl AudioThread {
     }
 }
 
-fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop: &AtomicBool) {
+fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop: &AtomicBool, clock: Clock) {
     let bpf = fmt.bytes_per_frame().max(1) as u64;
     let bytes_per_sec = fmt.rate as u64 * bpf;
-    let zeros = vec![0u8; (bytes_per_sec / 10) as usize]; // 100 ms
+    let align = |b: u64| b / bpf * bpf;
+    let ms = |m: u64| align(bytes_per_sec * m / 1000);
+    let zeros = vec![0u8; ms(100) as usize];
+
+    // Sincronía: la muestra n del audio debe corresponder al instante (fotograma 0 del vídeo + n/frecuencia).
+    // Mientras no se conoce el fotograma 0 se usa este instante; en cuanto la grabadora lo mide,
+    // se corrige recortando o rellenando y a partir de ahí el audio queda atado al reloj del vídeo
+    // (eso también compensa la pequeña deriva del reloj de la tarjeta de sonido).
     let start = Instant::now();
     let mut written: u64 = 0;
     let mut buf: Vec<u8> = Vec::with_capacity(bytes_per_sec as usize / 5);
+    let _ = cap.read(&mut buf); // descartar lo capturado antes de arrancar
     let mut device_ok = true;
     let mut last_reopen = Instant::now();
 
@@ -126,23 +137,31 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
             }
         }
 
+        let reference = clock.lock().ok().and_then(|g| *g).unwrap_or(start);
+        let expected = align(Instant::now().saturating_duration_since(reference).as_micros() as u64 * bytes_per_sec / 1_000_000);
         if !buf.is_empty() {
-            if stdin.write_all(&buf).is_err() {
-                return;
+            let max = expected + ms(30);
+            if written + buf.len() as u64 > max {
+                buf.truncate(align(max.saturating_sub(written)) as usize);
             }
-            written += buf.len() as u64;
-        } else {
-            let expected = start.elapsed().as_micros() as u64 * bytes_per_sec / 1_000_000 / bpf * bpf;
-            let mut lag = expected.saturating_sub(written);
-            if lag >= bytes_per_sec / 50 {
-                while lag > 0 {
-                    let n = lag.min(zeros.len() as u64) as usize;
-                    if stdin.write_all(&zeros[..n]).is_err() {
-                        return;
-                    }
-                    written += n as u64;
-                    lag -= n as u64;
+            if !buf.is_empty() {
+                if stdin.write_all(&buf).is_err() {
+                    return;
                 }
+                written += buf.len() as u64;
+            }
+        }
+        let lag = expected.saturating_sub(written);
+        let threshold = if buf.is_empty() { ms(30) } else { ms(120) };
+        if lag >= threshold {
+            let mut left = lag;
+            while left > 0 {
+                let n = left.min(zeros.len() as u64) as usize;
+                if stdin.write_all(&zeros[..n]).is_err() {
+                    return;
+                }
+                written += n as u64;
+                left -= n as u64;
             }
         }
         std::thread::sleep(Duration::from_millis(10));

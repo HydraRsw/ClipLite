@@ -43,6 +43,7 @@ pub struct Config {
     pub clips_in_full: bool,
     pub sound: bool,
     pub notifications: bool,
+    pub open_player: bool,
     pub ffmpeg: String,
 }
 
@@ -90,6 +91,7 @@ impl Default for Config {
             clips_in_full: true,
             sound: true,
             notifications: true,
+            open_player: true,
             ffmpeg: String::new(),
         }
     }
@@ -161,6 +163,7 @@ impl Config {
                 "clips_en_modo_completa" => self.clips_in_full = parse_bool(v).unwrap_or(self.clips_in_full),
                 "sonido" => self.sound = parse_bool(v).unwrap_or(self.sound),
                 "notificaciones" => self.notifications = parse_bool(v).unwrap_or(self.notifications),
+                "abrir_reproductor" => self.open_player = parse_bool(v).unwrap_or(self.open_player),
                 "ffmpeg" => self.ffmpeg = v.to_string(),
                 _ => {}
             }
@@ -224,6 +227,10 @@ eventos_lol = {lol}
 eventos_cs2 = {cs2}
 puerto_cs2 = {port}
 
+# ---------------- Reproductor ----------------
+# Abrir el reproductor con la partida y sus clips al cerrar el juego
+abrir_reproductor = {player}
+
 # ---------------- Otros ----------------
 sonido = {sonido}
 notificaciones = {notif}
@@ -253,6 +260,7 @@ ffmpeg = {ffmpeg}
             port = self.cs2_port,
             sonido = b(self.sound),
             notif = b(self.notifications),
+            player = b(self.open_player),
             ffmpeg = self.ffmpeg,
         );
         std::fs::write(path, text)

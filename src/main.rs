@@ -15,6 +15,7 @@ mod config;
 mod controller;
 mod events;
 mod json;
+mod library;
 mod platform;
 mod recorder;
 mod util;

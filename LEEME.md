@@ -8,6 +8,7 @@ Grabador de partidas y clips para Windows, al estilo de Outplayed, diseñado par
   - **Partida completa**: guarda la partida entera en un vídeo (y además los clips por separado).
 - **Ctrl+F10** guarda un clip de los últimos 30 s en cualquier juego. **Ctrl+F9** empieza/para a mano.
 - Eliges la carpeta donde se guarda todo.
+- **Al cerrar el juego se abre el reproductor** con la partida, sus clips y una línea de tiempo con cada kill, multikill u objetivo marcados. Haz clic en un marcador para saltar a ese momento. También se abre con doble clic en el icono o desde "Ver mis partidas y clips".
 
 ## Por qué casi no consume recursos
 
@@ -77,6 +78,7 @@ Kills seguidas se unen en un único clip con la etiqueta del mejor momento (por 
 | `codec` | `h264` | `hevc` ocupa la mitad (algunas apps no lo reproducen) |
 | `segundos_antes` / `segundos_despues` | 15 / 5 | duración de los clips automáticos |
 | `segundos_clip_manual` | 30 | lo que guarda Ctrl+F10 |
+| `abrir_reproductor` | si | abrir el reproductor al cerrar el juego |
 | `atajo_clip` / `atajo_grabar` | Ctrl+F10 / Ctrl+F9 | |
 | `juegos` | lista | añade el `.exe` de cualquier juego para que lo detecte |
 | `eventos_lol` | kills, multikills, objetivos | añade `muertes`, `asistencias` si quieres |
@@ -84,9 +86,22 @@ Kills seguidas se unen en un único clip con la etiqueta del mejor momento (por 
 
 Espacio en disco: en modo momentos solo hay ~1 minuto de búfer temporal. En modo completa, a 20 Mbps una hora ocupa ~9 GB.
 
+## Reproductor
+
+Es una página (`ClipLite.html`, en tu carpeta de vídeos) que se abre como ventana de aplicación con Microsoft Edge, que ya viene con Windows. Cuando está cerrada no consume nada.
+
+- Arriba, las partidas (número, juego, fecha, kills, clips y duración). Filtra por juego o busca.
+- En el centro, la partida completa o el clip elegido.
+- Abajo, la línea de tiempo con los momentos marcados; las franjas rojas son los clips guardados.
+- A la derecha, los clips de la partida. ☆ los marca como favoritos.
+- Teclas: `Espacio` pausa · `←` `→` 5 s · `,` `.` fotograma a fotograma · `N` `P` siguiente/anterior momento · `F` pantalla completa · `M` silencio.
+
+Si no quieres que se abra solo, pon `abrir_reproductor = no` en la configuración.
+
 ## Problemas frecuentes
 
 - **Pantalla negra en un juego**: ponlo en "Ventana sin bordes" / "Pantalla completa sin bordes". La pantalla completa exclusiva antigua no siempre se puede capturar.
+- **"AcquireNextFrame failed: 887a0026" en el registro**: Windows le quitó la pantalla a la captura (cambio a pantalla completa, alt-tab, aviso de UAC). ClipLite la reanuda en menos de un segundo dentro de la misma partida. Si pasa a menudo, usa "Sin bordes".
 - **El atajo no funciona**: otro programa lo usa (por ejemplo, la superposición de NVIDIA usa Alt+F9 y Alt+F10). Cámbialo en la configuración.
 - **CS2 no genera clips**: reinicia CS2 tras abrir ClipLite por primera vez (necesita leer el archivo de integración al arrancar).
 - **Cualquier otra cosa**: menú → Ver registro.
@@ -101,5 +116,6 @@ Espacio en disco: en modo momentos solo hay ~1 minuto de búfer temporal. En mod
 | `recorder.rs` | FFmpeg, segmentos, clips, partida completa, recuperación tras un cierre inesperado |
 | `audio.rs` | envía el audio a FFmpeg y rellena silencios |
 | `events.rs` | detección de momentos de LoL y CS2 |
+| `library.rs`, `player.html` | biblioteca de partidas y reproductor |
 | `config.rs`, `json.rs`, `util.rs`, `log.rs` | utilidades |
 | `headless.rs` | banco de pruebas que simula una partida (solo fuera de Windows) |

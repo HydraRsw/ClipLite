@@ -18,6 +18,7 @@ pub enum Cmd {
     SetMode(Mode),
     SetFolder(PathBuf),
     Reload,
+    OpenLibrary,
     Notice(String),
     Quit,
 }
@@ -104,7 +105,7 @@ impl Controller {
             self.tick();
         }
 
-        self.stop_session();
+        self.stop_session(false);
         // Esperar a que terminen de guardarse clips/partidas antes de salir.
         let (dead_tx, _) = channel();
         self.jobs = dead_tx;
@@ -126,12 +127,12 @@ impl Controller {
             Cmd::GameStopped(exe) => {
                 self.running_game = None;
                 if matches!(&self.session, Some((_, Source::Auto(g))) if *g == exe) {
-                    self.stop_session();
+                    self.stop_session(self.cfg.open_player);
                 }
             }
             Cmd::ToggleRecord => {
                 if self.session.is_some() {
-                    self.stop_session();
+                    self.stop_session(self.cfg.open_player);
                 } else {
                     let game = self.running_game.clone().unwrap_or_else(|| "Escritorio".into());
                     self.start_session(&game, Source::Manual);
@@ -184,6 +185,10 @@ impl Controller {
                 }
                 self.notice("Configuración recargada");
             }
+            Cmd::OpenLibrary => {
+                let html = crate::library::ensure_html(&self.cfg.output_dir);
+                crate::platform::open_player(&html, None);
+            }
             Cmd::Notice(msg) => self.notice(&msg),
             Cmd::Quit => {}
         }
@@ -202,7 +207,7 @@ impl Controller {
                 Source::Auto(g) => g.clone(),
                 Source::Manual => s.game().to_string(),
             };
-            s.stop(&self.jobs);
+            s.stop(&self.jobs, false);
             self.stop_lol();
             self.restarts += 1;
             if self.restarts <= 5 {
@@ -249,10 +254,10 @@ impl Controller {
         }
     }
 
-    fn stop_session(&mut self) {
+    fn stop_session(&mut self, open_player: bool) {
         self.stop_lol();
         if let Some((s, _)) = self.session.take() {
-            s.stop(&self.jobs);
+            s.stop(&self.jobs, open_player);
             self.beep();
         }
     }

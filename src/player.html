@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipLite</title>
+<style>
+:root{
+  --bg:#0f1014; --panel:#16171d; --panel2:#1d1f27; --line:#2a2d38; --text:#e8e9ee; --dim:#9497a3; --faint:#5d606c;
+  --accent:#e5393f; --accent2:#ff6a5c; --gold:#f2b134; --obj:#9b7bff; --ast:#4aa3ff; --death:#7c808c; --manual:#f2d24b;
+  --r:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.app{display:grid;grid-template-columns:64px minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100%}
+/* barra lateral */
+.rail{background:#0b0c0f;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:6px}
+.logo{width:36px;height:36px;margin-bottom:14px}
+.rail button{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;color:var(--faint);position:relative}
+.rail button:hover{color:var(--text);background:var(--panel2)}
+.rail button.on{color:var(--text);background:var(--panel2)}
+.rail button.on::before{content:"";position:absolute;left:-10px;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--accent)}
+.rail svg{width:22px;height:22px}
+.tip{position:absolute;left:52px;white-space:nowrap;background:#000;padding:4px 8px;border-radius:6px;font-size:12px;opacity:0;pointer-events:none;transition:.12s;z-index:5}
+.rail button:hover .tip{opacity:1}
+/* principal */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;overflow:hidden}
+header{display:flex;align-items:center;gap:14px;padding:14px 22px 10px}
+.crumbs{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:600}
+.crumbs .sep{color:var(--faint);font-weight:400}
+select,input{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px;outline:none}
+select:focus,input:focus{border-color:var(--faint)}
+.crumbs select{font-size:16px;font-weight:500}
+header .grow{flex:1}
+header input{width:220px}
+/* tarjetas de sesiones */
+.sessions{display:flex;gap:10px;overflow-x:auto;padding:4px 22px 14px;scrollbar-width:thin;flex:none}
+.card{flex:none;width:230px;display:flex;gap:10px;align-items:center;padding:10px;border-radius:var(--r);background:var(--panel);border:1px solid transparent;text-align:left;transition:.12s}
+.card:hover{background:var(--panel2)}
+.card.on{background:var(--panel2);border-color:var(--line);box-shadow:inset 0 -2px 0 var(--accent)}
+.badge{flex:none;width:52px;height:52px;border-radius:8px;display:grid;place-items:center;font-weight:800;font-size:22px;color:#fff}
+.card .t{font-weight:600;font-size:15px}
+.card .s{color:var(--dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.card .k{font-size:12px;color:var(--text)}
+.card .tro{margin-left:auto;align-self:flex-start;color:var(--gold);font-size:14px}
+/* escenario */
+.stage{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 300px;grid-template-rows:minmax(0,1fr);gap:0 18px;padding:0 22px 16px}
+.left{display:flex;flex-direction:column;min-height:0;min-width:0}
+.titlebar{display:flex;align-items:center;gap:10px;padding:2px 0 8px}
+.titlebar h2{margin:0;font-size:17px;font-weight:600}
+.titlebar .meta{color:var(--dim);font-size:13px}
+.titlebar .grow{flex:1}
+.chip{padding:6px 11px;border-radius:8px;background:var(--panel);border:1px solid var(--line);font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.chip:hover{background:var(--panel2)}
+.chip.on{border-color:var(--accent);color:#fff}
+.star{color:var(--faint);font-size:18px;line-height:1}
+.star.on{color:var(--manual)}
+.player{position:relative;flex:1;min-height:120px;background:#000;border-radius:var(--r);overflow:hidden}
+video#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;outline:none}
+.msg{position:absolute;inset:0;display:none;place-items:center;text-align:center;color:var(--dim);padding:30px}
+.msg.show{display:grid}
+.toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);padding:6px 12px;border-radius:8px;font-size:13px;opacity:0;transition:.2s;pointer-events:none}
+.toast.show{opacity:1}
+/* línea de tiempo */
+.tlwrap{padding:10px 4px 0;flex:none}
+.tlbar{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px;padding-bottom:6px}
+.tlbar .grow{flex:1}
+.tlbar button{padding:4px 9px;border-radius:6px;color:var(--dim);font-size:12px}
+.tlbar button:hover{background:var(--panel2);color:var(--text)}
+.tlbar button.on{color:var(--text);background:var(--panel2)}
+.timeline{position:relative;height:76px;cursor:pointer;user-select:none;flex:none}
+.track{position:absolute;left:0;right:0;top:44px;height:6px;background:var(--panel2);border-radius:3px}
+.band{position:absolute;top:44px;height:6px;background:rgba(229,57,63,.45);border-radius:3px}
+.band.cur{background:var(--accent)}
+.played{position:absolute;left:0;top:44px;height:6px;background:rgba(255,255,255,.18);border-radius:3px;pointer-events:none}
+.mk{position:absolute;top:6px;transform:translateX(-50%);width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--panel);border:1px solid var(--line);font-size:13px;z-index:2;transition:transform .1s}
+.mk:hover{transform:translateX(-50%) scale(1.18);z-index:3}
+.mk::after{content:"";position:absolute;bottom:-12px;left:50%;width:1px;height:11px;background:var(--line)}
+.mk .lbl{position:absolute;bottom:32px;white-space:nowrap;background:#000;padding:3px 7px;border-radius:5px;font-size:11px;opacity:0;pointer-events:none}
+.mk:hover .lbl{opacity:1}
+.head{position:absolute;top:36px;width:2px;height:22px;background:#fff;border-radius:1px;transform:translateX(-1px);pointer-events:none;z-index:4}
+.hover{position:absolute;top:58px;transform:translateX(-50%);font-size:11px;color:var(--dim);pointer-events:none;display:none}
+.ruler{position:absolute;left:0;right:0;top:56px;height:18px;font-size:11px;color:var(--faint);pointer-events:none}
+.ruler span{position:absolute;transform:translateX(-50%)}
+.ruler span::before{content:"";position:absolute;left:50%;top:-6px;width:1px;height:4px;background:var(--faint)}
+/* clips */
+.right{display:flex;flex-direction:column;min-height:0}
+.right h3{margin:2px 0 10px;font-size:14px;font-weight:600;color:var(--dim);display:flex;align-items:center;gap:8px}
+.right h3 .grow{flex:1}
+.list{overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;scrollbar-width:thin}
+.clip{display:grid;grid-template-columns:120px 1fr;gap:10px;padding:6px;border-radius:var(--r);background:var(--panel);border:1px solid transparent;text-align:left;align-items:center}
+.clip:hover{background:var(--panel2)}
+.clip.on{border-color:var(--accent);background:var(--panel2)}
+.thumb{position:relative;width:120px;height:68px;border-radius:6px;overflow:hidden;background:#000}
+.thumb video{width:100%;height:100%;object-fit:cover;pointer-events:none}
+.thumb .d{position:absolute;right:4px;bottom:3px;font-size:11px;background:rgba(0,0,0,.7);padding:0 4px;border-radius:3px}
+.clip .n{font-weight:600;display:flex;align-items:center;gap:6px}
+.clip .g{font-size:12px;color:var(--dim)}
+.clip .star{margin-left:auto}
+.empty{flex:1;display:grid;place-items:center;text-align:center;color:var(--dim);padding:40px}
+.empty h2{color:var(--text);margin:0 0 8px}
+kbd{font:11px "Segoe UI";background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.keys{color:var(--faint);font-size:12px;margin-top:10px;line-height:1.9}
+@media (max-width:1000px){.stage{grid-template-columns:1fr}.right{max-height:220px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <svg class="logo" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="#e5393f" stroke-width="3"/><circle cx="18" cy="18" r="7" fill="#e5393f"/></svg>
+    <button id="navAll" class="on"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg><span class="tip">Sesiones</span></button>
+    <button id="navFav"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8l2.8 5.8 6.4.9-4.6 4.5 1.1 6.3L12 17.3l-5.7 3 1.1-6.3L2.8 9.5l6.4-.9z"/></svg><span class="tip">Favoritos</span></button>
+  </nav>
+  <div class="main" id="main"></div>
+</div>
+
+<script>
+const DATA = __CLIPLITE_DATA__;
+
+// ------------------------------------------------------------- utilidades
+const $ = (s, el = document) => el.querySelector(s);
+const h = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(k));
+  return e;
+};
+const src = rel => rel.split("/").map(encodeURIComponent).join("/");
+const fmt = s => {
+  s = Math.max(0, Math.floor(s || 0));
+  const hh = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = String(s % 60).padStart(2, "0");
+  return hh ? `${hh}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+};
+const MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+const fdate = d => {
+  const m = /^(\d+)-(\d+)-(\d+)_(\d+)-(\d+)/.exec(d || "");
+  return m ? `${+m[3]} ${MESES[m[2] - 1]} ${m[1]}, ${m[4]}:${m[5]}` : d;
+};
+const hue = s => { let x = 0; for (const c of s) x = (x * 31 + c.charCodeAt(0)) >>> 0; return x % 360; };
+const initials = g => { const w = g.split(/[\s-]+/).filter(x => x.length > 2 || /\d/.test(x)); return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] || g).slice(0, 2)).toUpperCase(); };
+
+const EV = {
+  kill: ["Kill", "⚔", "kill"], "2k": ["Doble kill", "⚔", "multi"], "3k": ["Triple kill", "🔥", "multi"],
+  "4k": ["4 kills", "🔥", "multi"], ace: ["Ace", "👑", "multi"], doublekill: ["Doble kill", "⚔", "multi"],
+  triplekill: ["Triple kill", "🔥", "multi"], quadrakill: ["Cuádruple kill", "🔥", "multi"],
+  pentakill: ["PENTAKILL", "👑", "multi"], primera_sangre: ["Primera sangre", "🩸", "kill"],
+  muerte: ["Muerte", "☠", "death"], asistencia: ["Asistencia", "🤝", "ast"], dragon: ["Dragón", "🐉", "obj"],
+  baron: ["Barón", "🟣", "obj"], heraldo: ["Heraldo", "🟪", "obj"], larvas: ["Larvas", "🐛", "obj"],
+  atakhan: ["Atakhan", "🟥", "obj"], torre: ["Torre", "🏰", "obj"], inhibidor: ["Inhibidor", "💠", "obj"],
+  manual: ["Clip manual", "★", "manual"],
+};
+const COLORS = { kill: "var(--accent)", multi: "var(--gold)", death: "var(--death)", ast: "var(--ast)", obj: "var(--obj)", manual: "var(--manual)" };
+const ev = l => EV[l] || [l.replace(/_/g, " "), "•", "kill"];
+const isKill = (l, game) => ["kill", "2k", "3k", "4k"].includes(l) || (l === "ace" && !/league/i.test(game));
+
+let favs = new Set();
+try { favs = new Set(JSON.parse(localStorage.getItem("cliplite.fav") || "[]")); } catch (e) {}
+const saveFavs = () => { try { localStorage.setItem("cliplite.fav", JSON.stringify([...favs])); } catch (e) {} };
+
+// número de partida por juego (en orden cronológico)
+const sessions = DATA.slice().sort((a, b) => a.date.localeCompare(b.date));
+const counter = {};
+for (const s of sessions) { counter[s.game] = (counter[s.game] || 0) + 1; s.n = counter[s.game]; s.kills = s.events.filter(e => isKill(e.label, s.game)).length; }
+sessions.reverse();
+const games = [...new Set(sessions.map(s => s.game))];
+
+// ------------------------------------------------------------- estado
+const st = { view: "all", game: "", q: "", sel: null, playing: null /* null = partida; objeto clip */ };
+let video, tl;
+
+function filtered() {
+  const q = st.q.toLowerCase();
+  return sessions.filter(s => (!st.game || s.game === st.game) &&
+    (!q || s.game.toLowerCase().includes(q) || fdate(s.date).toLowerCase().includes(q) ||
+      s.clips.some(c => ev(c.label)[0].toLowerCase().includes(q))));
+}
+
+// ------------------------------------------------------------- interfaz
+function render() {
+  const main = $("#main");
+  main.innerHTML = "";
+  $("#navAll").classList.toggle("on", st.view === "all");
+  $("#navFav").classList.toggle("on", st.view === "fav");
+
+  if (!sessions.length) {
+    main.append(h("div", { class: "empty" }, h("div", {},
+      h("h2", {}, "Aún no hay partidas"),
+      h("div", {}, "Abre un juego: ClipLite empezará a grabar solo y aquí aparecerán tus partidas y clips."))));
+    return;
+  }
+
+  const header = h("header", {},
+    h("div", { class: "crumbs" },
+      h("span", {}, st.view === "fav" ? "Favoritos" : "Sesiones"), h("span", { class: "sep" }, "›"),
+      h("select", { onchange: e => { st.game = e.target.value; pickFirst(); render(); } },
+        h("option", { value: "" }, "Todos los juegos"),
+        games.map(g => h("option", { value: g, selected: st.game === g ? "" : false }, g)))),
+    h("div", { class: "grow" }),
+    h("input", { placeholder: "Buscar…", value: st.q, oninput: e => { st.q = e.target.value; renderCards(); } }));
+  main.append(header);
+
+  if (st.view === "fav") return renderFavs(main);
+
+  main.append(h("section", { class: "sessions", id: "cards" }));
+  renderCards();
+  const s = st.sel;
+  if (!s) return;
+
+  const stage = h("section", { class: "stage" });
+  const left = h("div", { class: "left" });
+  const right = h("div", { class: "right" });
+  stage.append(left, right);
+  main.append(stage);
+
+  left.append(h("div", { class: "titlebar" },
+    h("h2", { id: "title" }), h("span", { class: "meta", id: "meta" }),
+    h("div", { class: "grow" }),
+    s.match ? h("button", { class: "chip", id: "fullBtn", onclick: () => playMatch(0) }, "▶ Partida completa") : null,
+    h("button", { class: "chip", onclick: copyPath, title: "Copiar la ruta del vídeo" }, "Copiar ruta")));
+
+  video = h("video", { id: "v", controls: "", preload: "metadata" });
+  video.addEventListener("error", () => showMsg("No se encuentra este vídeo.\n¿Lo moviste, renombraste o borraste?"));
+  video.addEventListener("loadeddata", () => showMsg(""));
+  video.addEventListener("timeupdate", updateHead);
+  video.addEventListener("ended", () => { if (st.playing) nextClip(1, true); });
+  video.addEventListener("loadedmetadata", () => { if (!st.playing) buildTimelineOnce(); });
+  lastT = 0;
+  left.append(h("div", { class: "player" }, video, h("div", { class: "msg", id: "msg" }), h("div", { class: "toast", id: "toast" })));
+
+  const speeds = [0.25, 0.5, 1, 2].map(r => h("button", { class: r === 1 ? "on" : "", "data-r": r, onclick: e => setRate(r) }, r + "×"));
+  tl = h("div", { class: "timeline", id: "tl" });
+  left.append(h("div", { class: "tlwrap" },
+    h("div", { class: "tlbar" },
+      h("button", { onclick: () => jumpEvent(-1), title: "Momento anterior (P)" }, "‹ Anterior"),
+      h("button", { onclick: () => jumpEvent(1), title: "Momento siguiente (N)" }, "Siguiente ›"),
+      h("span", { id: "tltime" }),
+      h("div", { class: "grow" }), "Velocidad", speeds),
+    tl));
+  buildTimeline();
+
+  right.append(h("h3", {}, `Clips (${s.clips.length})`, h("div", { class: "grow" }),
+    s.clips.length > 1 && !s.match ? h("button", { class: "chip", onclick: () => playClip(s.clips[0]) }, "▶ Ver todos") : null));
+  const list = h("div", { class: "list" });
+  if (!s.clips.length) list.append(h("div", { class: "g", style: "color:var(--dim);padding:10px" }, "Esta partida no tiene clips."));
+  for (const c of s.clips) list.append(clipCard(c, s));
+  right.append(list);
+  right.append(h("div", { class: "keys" },
+    h("kbd", {}, "Espacio"), " pausa · ", h("kbd", {}, "←"), h("kbd", {}, "→"), " 5 s · ",
+    h("kbd", {}, ","), h("kbd", {}, "."), " fotograma · ", h("kbd", {}, "N"), h("kbd", {}, "P"), " momentos · ",
+    h("kbd", {}, "F"), " pantalla completa"));
+
+  if (s.match) playMatch(0, false); else if (s.clips.length) playClip(s.clips[0], 0, false);
+}
+
+function renderCards() {
+  const box = $("#cards");
+  if (!box) return;
+  box.innerHTML = "";
+  const list = filtered();
+  if (!list.length) box.append(h("div", { style: "color:var(--dim);padding:14px" }, "Ninguna partida coincide."));
+  for (const s of list) {
+    const best = s.events.some(e => ["pentakill", "ace", "quadrakill", "4k"].includes(e.label));
+    box.append(h("button", { class: "card" + (s === st.sel ? " on" : ""), onclick: () => select(s) },
+      h("div", { class: "badge", style: `background:linear-gradient(135deg,hsl(${hue(s.game)} 60% 42%),hsl(${(hue(s.game) + 40) % 360} 55% 28%))` }, initials(s.game)),
+      h("div", {},
+        h("div", { class: "t" }, `Partida ${String(s.n).padStart(2, "0")}`),
+        h("div", { class: "s" }, s.game),
+        h("div", { class: "s" }, fdate(s.date)),
+        h("div", { class: "k" }, `Kills: ${s.kills} · ${s.clips.length} clip${s.clips.length === 1 ? "" : "s"} · ${fmt(s.duration)}`)),
+      best ? h("span", { class: "tro", title: "Gran momento" }, "🏆") : null));
+  }
+  const on = box.querySelector(".on");
+  if (on) on.scrollIntoView({ inline: "nearest", block: "nearest" });
+}
+
+function clipCard(c, s, showGame) {
+  const [name, icon, cat] = ev(c.label);
+  const fav = favs.has(c.file);
+  const star = h("span", { class: "star" + (fav ? " on" : ""), title: "Favorito", onclick: e => { e.stopPropagation(); toggleFav(c.file, star); } }, fav ? "★" : "☆");
+  return h("button", { class: "clip", "data-file": c.file, onclick: () => showGame ? openFav(s, c) : playClip(c) },
+    h("div", { class: "thumb" }, h("video", { preload: "metadata", muted: "", src: src(c.file) + "#t=" + Math.min(2, (c.dur || 4) / 2) }), h("span", { class: "d" }, fmt(c.dur))),
+    h("div", {},
+      h("div", { class: "n" }, h("span", { style: `color:${COLORS[cat]}` }, icon), name, star),
+      h("div", { class: "g" }, showGame ? `${s.game} · ${fdate(s.date)}` : (s.match ? `en ${fmt(c.t)}` : fdate(s.date)))));
+}
+
+function renderFavs(main) {
+  const items = [];
+  for (const s of sessions) for (const c of s.clips) if (favs.has(c.file) && (!st.game || s.game === st.game)) items.push([s, c]);
+  if (!items.length) {
+    main.append(h("div", { class: "empty" }, h("div", {}, h("h2", {}, "Sin favoritos"), h("div", {}, "Marca un clip con ☆ para guardarlo aquí."))));
+    return;
+  }
+  const grid = h("div", { class: "list", style: "padding:6px 22px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px" });
+  for (const [s, c] of items) grid.append(clipCard(c, s, true));
+  main.append(grid);
+}
+
+function openFav(s, c) { st.view = "all"; st.game = ""; select(s); playClip(c); }
+
+function toggleFav(file, el) {
+  favs.has(file) ? favs.delete(file) : favs.add(file);
+  saveFavs();
+  document.querySelectorAll(".clip").forEach(b => {
+    if (b.dataset.file === file) { const x = b.querySelector(".star"); x.classList.toggle("on", favs.has(file)); x.textContent = favs.has(file) ? "★" : "☆"; }
+  });
+  if (st.view === "fav") render();
+}
+
+// ------------------------------------------------------------- reproducción
+function select(s) {
+  st.sel = s;
+  try { history.replaceState(null, "", "#s=" + encodeURIComponent(s.id)); } catch (e) {}
+  render();
+}
+function pickFirst() { const f = filtered(); if (!f.includes(st.sel)) st.sel = f[0] || null; }
+
+function load(rel, at, autoplay) {
+  const want = src(rel);
+  if (video.getAttribute("src") !== want) {
+    video.setAttribute("src", want);
+    video.addEventListener("loadedmetadata", () => { video.currentTime = at || 0; if (autoplay !== false) video.play().catch(() => {}); }, { once: true });
+  } else {
+    video.currentTime = at || 0;
+    if (autoplay !== false) video.play().catch(() => {});
+  }
+}
+
+function playMatch(t, autoplay) {
+  const s = st.sel;
+  st.playing = null;
+  load(s.match, Math.max(0, t || 0), autoplay);
+  setTitle("Partida completa", `${s.game} · ${fdate(s.date)} · ${fmt(s.duration)}`);
+  markActive();
+}
+
+function playClip(c, offset, autoplay) {
+  const s = st.sel;
+  st.playing = c;
+  load(c.file, offset || 0, autoplay);
+  const [name] = ev(c.label);
+  setTitle(name, `${s.game} · ${fdate(s.date)}${s.match ? " · minuto " + fmt(c.t) : ""} · ${fmt(c.dur)}`);
+  markActive();
+}
+
+function nextClip(dir, auto) {
+  const cl = st.sel.clips, i = cl.indexOf(st.playing);
+  const n = cl[i + dir];
+  if (n) playClip(n);
+  else if (auto) toast("Fin de los clips");
+}
+
+function setTitle(t, m) { $("#title").textContent = t; $("#meta").textContent = m; }
+
+function markActive() {
+  document.querySelectorAll(".clip").forEach(b => b.classList.toggle("on", !!st.playing && b.dataset.file === st.playing.file));
+  const fb = $("#fullBtn"); if (fb) fb.classList.toggle("on", !st.playing);
+  tl && tl.querySelectorAll(".band").forEach(b => b.classList.toggle("cur", !!st.playing && b.dataset.file === st.playing.file));
+}
+
+/** Posición actual en la escala de la sesión. */
+function sessionTime() {
+  if (!video) return 0;
+  return st.playing ? st.playing.t + video.currentTime : video.currentTime;
+}
+function total() {
+  const s = st.sel;
+  if (!st.playing && video && isFinite(video.duration) && video.duration > 0) return video.duration;
+  return Math.max(s.duration || 0, ...s.clips.map(c => c.t + c.dur), ...s.events.map(e => e.t + 1), 1);
+}
+
+/** Ir a un punto de la sesión: en la partida si existe, o en el clip que lo contiene. */
+function seekSession(t) {
+  const s = st.sel;
+  if (s.match) return playMatch(t);
+  const c = s.clips.find(c => t >= c.t - 0.5 && t <= c.t + c.dur + 0.5);
+  if (c) playClip(c, Math.max(0, t - c.t));
+  else toast("Ese momento no se guardó en clip");
+}
+
+function jumpEvent(dir) {
+  const s = st.sel, now = sessionTime();
+  const evs = s.events.map(e => e.t).sort((a, b) => a - b);
+  const target = dir > 0 ? evs.find(t => t - 3 > now + 0.5) : evs.reverse().find(t => t - 3 < now - 1.5);
+  if (target == null) return toast(dir > 0 ? "No hay más momentos" : "Es el primer momento");
+  seekSession(Math.max(0, target - 3));
+}
+
+function setRate(r) {
+  video.playbackRate = r;
+  document.querySelectorAll(".tlbar [data-r]").forEach(b => b.classList.toggle("on", +b.dataset.r === r));
+  toast("Velocidad " + r + "×");
+}
+
+// ------------------------------------------------------------- línea de tiempo
+function buildTimeline() {
+  const s = st.sel, T = total();
+  tl.innerHTML = "";
+  tl.append(h("div", { class: "track" }));
+  for (const c of s.clips) {
+    tl.append(h("div", { class: "band", "data-file": c.file, title: ev(c.label)[0], style: `left:${c.t / T * 100}%;width:${Math.max(0.4, c.dur / T * 100)}%` }));
+  }
+  tl.append(h("div", { class: "played", id: "played" }));
+  // marcadores (los muy juntos se agrupan para que no se tapen)
+  const evs = s.events.slice().sort((a, b) => a.t - b.t);
+  const minGap = T * 0.012;
+  const groups = [];
+  for (const e of evs) {
+    const g = groups[groups.length - 1];
+    if (g && e.t - g.at <= minGap) g.items.push(e); else groups.push({ at: e.t, items: [e] });
+  }
+  const rank = { multi: 5, kill: 4, obj: 3, manual: 2, ast: 1, death: 0 };
+  for (const g of groups) {
+    const top = g.items.slice().sort((a, b) => rank[ev(b.label)[2]] - rank[ev(a.label)[2]])[0];
+    const [name, icon, cat] = ev(top.label);
+    const label = g.items.map(e => ev(e.label)[0]).join(" + ") + " · " + fmt(g.at);
+    tl.append(h("button", {
+      class: "mk", style: `left:${g.at / T * 100}%;color:${COLORS[cat]};border-color:${COLORS[cat]}`,
+      onclick: e => { e.stopPropagation(); seekSession(Math.max(0, g.at - 3)); },
+    }, icon, h("span", { class: "lbl" }, label)));
+  }
+  // regla
+  const ruler = h("div", { class: "ruler" });
+  const step = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].find(x => T / x <= 8) || 3600;
+  for (let x = 0; x <= T; x += step) ruler.append(h("span", { style: `left:${x / T * 100}%` }, x >= 60 ? Math.round(x / 60) + "m" : x + "s"));
+  tl.append(ruler, h("div", { class: "head", id: "head" }), h("div", { class: "hover", id: "hov" }));
+
+  const pos = e => { const r = tl.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * total(); };
+  tl.onclick = e => seekSession(pos(e));
+  tl.onmousemove = e => { const x = $("#hov"); x.style.display = "block"; x.style.left = (pos(e) / total() * 100) + "%"; x.textContent = fmt(pos(e)); };
+  tl.onmouseleave = () => { $("#hov").style.display = "none"; };
+  updateHead();
+}
+let lastT = 0;
+function buildTimelineOnce() { const T = total(); if (Math.abs(T - lastT) > 1) { lastT = T; buildTimeline(); markActive(); } }
+
+function updateHead() {
+  if (!tl) return;
+  const T = total(), t = sessionTime();
+  const head = $("#head"), played = $("#played");
+  if (head) head.style.left = (t / T * 100) + "%";
+  if (played) played.style.width = st.playing ? "0" : (t / T * 100) + "%";
+  const tt = $("#tltime");
+  if (tt) tt.textContent = `${fmt(t)} / ${fmt(T)}`;
+}
+
+// ------------------------------------------------------------- extras
+let toastTimer;
+function toast(t) {
+  const el = $("#toast"); if (!el) return;
+  el.textContent = t; el.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 1400);
+}
+function showMsg(t) {
+  const el = $("#msg"); if (!el) return;
+  el.textContent = t; el.classList.toggle("show", !!t);
+}
+function copyPath() {
+  const rel = st.playing ? st.playing.file : st.sel.match || (st.sel.clips[0] || {}).file;
+  if (!rel) return;
+  let p = decodeURIComponent(new URL(src(rel), location.href).pathname);
+  if (/^\/[A-Za-z]:\//.test(p)) p = p.slice(1).replace(/\//g, "\\");
+  const done = () => toast("Ruta copiada");
+  (navigator.clipboard ? navigator.clipboard.writeText(p).then(done) : Promise.reject()).catch(() => { prompt("Ruta del vídeo:", p); });
+}
+
+document.addEventListener("keydown", e => {
+  if (!video || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  const k = e.key.toLowerCase();
+  const fr = 1 / 60;
+  if (k === " " || k === "k") { e.preventDefault(); video.paused ? video.play() : video.pause(); }
+  else if (k === "arrowright" && e.target !== video) { e.preventDefault(); video.currentTime += 5; }
+  else if (k === "arrowleft" && e.target !== video) { e.preventDefault(); video.currentTime -= 5; }
+  else if (k === "l") video.currentTime += 10;
+  else if (k === "j") video.currentTime -= 10;
+  else if (k === ".") { video.pause(); video.currentTime += fr; }
+  else if (k === ",") { video.pause(); video.currentTime -= fr; }
+  else if (k === "n") jumpEvent(1);
+  else if (k === "p") jumpEvent(-1);
+  else if (k === "m") video.muted = !video.muted;
+  else if (k === "f") { document.fullscreenElement ? document.exitFullscreen() : video.requestFullscreen().catch(() => {}); }
+});
+
+$("#navAll").onclick = () => { st.view = "all"; if (!st.sel) pickFirst(); render(); };
+$("#navFav").onclick = () => { st.view = "fav"; if (video) video.pause(); render(); };
+
+// sesión pedida en la URL (#s=...) o la más reciente
+const want = decodeURIComponent((location.hash.match(/s=([^&]+)/) || [])[1] || "");
+st.sel = sessions.find(s => s.id === want) || sessions[0] || null;
+render();
+</script>
+</body>
+</html>
