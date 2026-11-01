@@ -18,6 +18,7 @@ mod json;
 mod library;
 mod platform;
 mod recorder;
+mod server;
 mod util;
 
 #[cfg(any(windows, feature = "checkwin"))]

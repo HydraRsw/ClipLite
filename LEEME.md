@@ -79,6 +79,9 @@ Kills seguidas se unen en un único clip con la etiqueta del mejor momento (por 
 | `segundos_antes` / `segundos_despues` | 15 / 5 | duración de los clips automáticos |
 | `segundos_clip_manual` | 30 | lo que guarda Ctrl+F10 |
 | `abrir_reproductor` | si | abrir el reproductor al cerrar el juego |
+| `pistas_por_aplicacion` | si | guardar juego y aplicaciones en pistas separadas |
+| `apps_con_pista_propia` | Discord.exe, Spotify.exe | añade el `.exe` de cualquier app (p. ej. `chrome.exe`) |
+| `microfono` | no | grabar tu micrófono en su propia pista |
 | `atajo_clip` / `atajo_grabar` | Ctrl+F10 / Ctrl+F9 | |
 | `juegos` | lista | añade el `.exe` de cualquier juego para que lo detecte |
 | `eventos_lol` | kills, multikills, objetivos | añade `muertes`, `asistencias` si quieres |
@@ -86,9 +89,26 @@ Kills seguidas se unen en un único clip con la etiqueta del mejor momento (por 
 
 Espacio en disco: en modo momentos solo hay ~1 minuto de búfer temporal. En modo completa, a 20 Mbps una hora ocupa ~9 GB.
 
+## Pistas de audio por aplicación
+
+Cada fuente de sonido se guarda en su propia pista dentro del vídeo:
+
+| Pista | Qué contiene |
+|---|---|
+| 1 · Todo | la mezcla completa (lo que oíste). Es la que reproducen Discord, WhatsApp, etc. |
+| Juego | solo el juego |
+| Discord, Spotify… | cada aplicación de `apps_con_pista_propia` que esté abierta al empezar la partida |
+| Micrófono | tu voz, si activas `microfono = si` (también se mezcla en la pista 1) |
+
+En el reproductor aparecen como casillas debajo del vídeo: desmarca **Discord** y lo oirás sin las voces al instante. Con **Guardar copia con este audio** se crea un vídeo nuevo (`…_sin-Discord.mp4`) junto al original, listo para compartir. El original no se toca.
+
+- Al quitar pistas se oyen solo las pistas marcadas: los sonidos de aplicaciones sin pista propia (por ejemplo, un vídeo de YouTube) solo están en "Todo".
+- Editores como DaVinci Resolve o Premiere muestran cada pista con su nombre.
+- Necesita Windows 11 o Windows 10 versión 2004 o posterior. En versiones anteriores se graba solo la pista "Todo", como siempre.
+
 ## Reproductor
 
-Es una página (`ClipLite.html`, en tu carpeta de vídeos) que se abre como ventana de aplicación con Microsoft Edge, que ya viene con Windows. Cuando está cerrada no consume nada.
+Se abre como ventana de aplicación con Microsoft Edge, que ya viene con Windows, y lo sirve ClipLite desde tu propio PC (`127.0.0.1`, inaccesible desde fuera y protegido con una clave aleatoria). Cuando está cerrado no consume nada. También existe `ClipLite.html` en tu carpeta de vídeos, que funciona sin ClipLite abierto pero sin poder silenciar pistas.
 
 - Arriba, las partidas (número, juego, fecha, kills, clips y duración). Filtra por juego o busca.
 - En el centro, la partida completa o el clip elegido.
@@ -111,11 +131,12 @@ Si no quieres que se abra solo, pon `abrir_reproductor = no` en la configuració
 | Archivo | Qué hace |
 |---|---|
 | `main.rs` | arranque |
-| `win.rs` | todo lo de Windows: bandeja, atajos, WASAPI (audio), procesos, WinHTTP, selector de carpeta |
+| `win.rs` | todo lo de Windows: bandeja, atajos, WASAPI (audio del sistema, por aplicación y micrófono), procesos, WinHTTP, selector de carpeta |
 | `controller.rs` | decide cuándo grabar y qué guardar |
 | `recorder.rs` | FFmpeg, segmentos, clips, partida completa, recuperación tras un cierre inesperado |
-| `audio.rs` | envía el audio a FFmpeg y rellena silencios |
+| `audio.rs` | mezclador multipista: sincroniza todas las fuentes con el vídeo y las envía a FFmpeg |
 | `events.rs` | detección de momentos de LoL y CS2 |
 | `library.rs`, `player.html` | biblioteca de partidas y reproductor |
+| `server.rs` | servidor local del reproductor: vídeos, mezcla de pistas y copias |
 | `config.rs`, `json.rs`, `util.rs`, `log.rs` | utilidades |
 | `headless.rs` | banco de pruebas que simula una partida (solo fuera de Windows) |

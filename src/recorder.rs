@@ -5,7 +5,7 @@
 //  * Modo "momentos": los segmentos viejos se borran solos (búfer circular en disco).
 //  * Modo "completa": se conservan y al terminar se unen en un único vídeo de la partida.
 // Unir segmentos copia bytes: un clip de 20 s tarda milisegundos y no gasta CPU ni GPU.
-use crate::audio::AudioThread;
+use crate::audio::{AudioThread, OutInfo, TrackSpec};
 use crate::config::{Config, Mode};
 use crate::controller::Cmd;
 use crate::util::{self, secs_between};
@@ -133,6 +133,8 @@ pub enum Job {
         faststart: bool,
         done: Option<Arc<AtomicBool>>,
         notice: Option<String>,
+        /// Nombres de las pistas de audio (el formato intermedio no los guarda).
+        titles: Vec<String>,
     },
     RemoveDir(PathBuf),
     /// Añade la sesión a la biblioteca y (opcionalmente) abre el reproductor.
@@ -147,9 +149,9 @@ pub fn spawn_worker(ffmpeg: PathBuf, rx: Receiver<Job>, notify: Sender<Cmd>) -> 
             let mut n = 0u64;
             while let Ok(job) = rx.recv() {
                 match job {
-                    Job::Concat { dir, files, out, faststart, done, notice } => {
+                    Job::Concat { dir, files, out, faststart, done, notice, titles } => {
                         n += 1;
-                        let ok = concat(&ffmpeg, &dir, &files, &out, faststart, n);
+                        let ok = concat(&ffmpeg, &dir, &files, &out, faststart, n, &titles);
                         if let Some(d) = done {
                             d.store(true, Ordering::SeqCst);
                         }
@@ -175,9 +177,9 @@ pub fn spawn_worker(ffmpeg: PathBuf, rx: Receiver<Job>, notify: Sender<Cmd>) -> 
                             continue;
                         }
                         match crate::library::add(&out_root, entry) {
-                            Ok((html, id)) => {
+                            Ok((_, id)) => {
                                 if open {
-                                    crate::platform::open_player(&html, Some(&id));
+                                    crate::platform::open_url(&crate::library::player_url(&out_root, Some(&id)));
                                 }
                             }
                             Err(e) => log!("No se pudo actualizar la biblioteca: {e}"),
@@ -189,7 +191,7 @@ pub fn spawn_worker(ffmpeg: PathBuf, rx: Receiver<Job>, notify: Sender<Cmd>) -> 
         .expect("hilo worker")
 }
 
-fn concat(ffmpeg: &Path, dir: &Path, files: &[String], out: &Path, faststart: bool, n: u64) -> bool {
+fn concat(ffmpeg: &Path, dir: &Path, files: &[String], out: &Path, faststart: bool, n: u64, titles: &[String]) -> bool {
     let list = dir.join(format!("concat_{n}.txt"));
     let body: String = files.iter().map(|f| format!("file '{}'\n", f.replace('\'', "'\\''"))).collect();
     if std::fs::write(&list, body).is_err() {
@@ -201,6 +203,12 @@ fn concat(ffmpeg: &Path, dir: &Path, files: &[String], out: &Path, faststart: bo
     let mut args = sv(&["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i"]);
     args.push(list.to_string_lossy().into_owned());
     args.extend(sv(&["-map", "0", "-c", "copy"]));
+    if titles.len() > 1 {
+        for (k, t) in titles.iter().enumerate() {
+            args.extend([format!("-metadata:s:a:{k}"), format!("title={t}")]);
+            args.extend([format!("-metadata:s:a:{k}"), format!("handler_name={t}")]);
+        }
+    }
     if faststart {
         args.extend(sv(&["-movflags", "+faststart"]));
     }
@@ -263,6 +271,7 @@ pub fn recover_leftovers(buffer_root: &Path, out_root: &Path, jobs: &Sender<Job>
                 faststart: false,
                 done: None,
                 notice: Some("Partida interrumpida recuperada".into()),
+                titles: Vec::new(),
             });
         }
         let _ = jobs.send(Job::RemoveDir(dir));
@@ -288,6 +297,41 @@ pub struct LibEntry {
     pub clips: Vec<LibClip>,
     /// (etiqueta, segundo de la sesión)
     pub events: Vec<(String, f64)>,
+    pub tracks: Vec<String>,
+}
+
+/// Argumentos de FFmpeg para las pistas de audio. Con varias pistas, el flujo de entrada trae
+/// 2 canales por pista; se separan con `pan` y cada una se codifica como pista con nombre.
+/// La pista 1 es la mezcla completa (más el micrófono, si se graba).
+fn audio_track_args(info: &OutInfo) -> Vec<String> {
+    let n = info.tracks.len();
+    let mut a: Vec<String> = Vec::new();
+    if n <= 1 || info.fmt.channels as usize != 2 * n {
+        a.extend(sv(&["-map", "1:a", "-c:a", "aac", "-b:a", "160k", "-ac", "2"]));
+    } else {
+        let mut f = format!("[1:a]asplit={n}");
+        for k in 0..n {
+            f.push_str(&format!("[x{k}]"));
+        }
+        for k in 0..n {
+            let (l, r) = (2 * k, 2 * k + 1);
+            let pan = match (k, info.mic_track()) {
+                (0, Some(m)) => format!("c0=c0+c{}|c1=c1+c{}", 2 * m, 2 * m + 1),
+                _ => format!("c0=c{l}|c1=c{r}"),
+            };
+            f.push_str(&format!(";[x{k}]pan=stereo|{pan}[a{k}]"));
+        }
+        a.extend(["-filter_complex".into(), f]);
+        for k in 0..n {
+            a.extend(["-map".into(), format!("[a{k}]")]);
+        }
+        a.extend(sv(&["-c:a", "aac", "-b:a", "160k"]));
+        for (k, t) in info.tracks.iter().enumerate() {
+            a.extend([format!("-metadata:s:a:{k}"), format!("title={}", t.name)]);
+        }
+    }
+    a.push("-shortest".into());
+    a
 }
 
 // ------------------------------------------------------------------ Una "parte" = un proceso FFmpeg
@@ -307,18 +351,27 @@ struct Part {
 }
 
 impl Part {
-    fn spawn(cfg: &Config, ffmpeg: &Path, enc: &Encoder, dir: &Path, idx: u32) -> Result<Part, String> {
+    fn spawn(
+        cfg: &Config,
+        ffmpeg: &Path,
+        enc: &Encoder,
+        dir: &Path,
+        idx: u32,
+        specs: &[TrackSpec],
+        strict: bool,
+    ) -> Result<(Part, Option<OutInfo>), String> {
         let mut audio = None;
-        let mut afmt = None;
-        if cfg.audio {
-            match AudioThread::start() {
-                Ok((a, f)) => {
+        let mut info: Option<OutInfo> = None;
+        if cfg.audio && !specs.is_empty() {
+            match AudioThread::start(specs.to_vec(), strict) {
+                Ok((a, i)) => {
                     audio = Some(a);
-                    afmt = Some(f);
+                    info = Some(i);
                 }
                 Err(e) => log!("Audio no disponible, se graba sin sonido: {e}"),
             }
         }
+        let afmt = info.as_ref().map(|i| i.fmt);
 
         let mut args = sv(&["-hide_banner", "-loglevel", "warning", "-nostats", "-y", "-thread_queue_size", "512"]);
         args.extend(crate::platform::video_input(cfg));
@@ -338,8 +391,8 @@ impl Part {
             "-force_key_frames".into(),
             format!("expr:gte(t,n_forced*{SEG_SECS})"),
         ]);
-        if afmt.is_some() {
-            args.extend(sv(&["-map", "1:a", "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-shortest"]));
+        if let Some(i) = &info {
+            args.extend(audio_track_args(i));
         }
         args.extend(sv(&["-progress", "pipe:1", "-stats_period", "0.5"]));
         args.extend(sv(&["-f", "segment", "-segment_time", "2", "-segment_format", "mpegts", "-segment_list"]));
@@ -399,7 +452,7 @@ impl Part {
                 a.attach(stdin, origin.clone());
             }
         }
-        Ok(Part {
+        let part = Part {
             idx,
             child,
             audio,
@@ -409,7 +462,8 @@ impl Part {
             csv_off: 0,
             csv_partial: String::new(),
             logged: false,
-        })
+        };
+        Ok((part, info))
     }
 
     fn origin(&mut self, fallback: bool) -> Option<Instant> {
@@ -504,6 +558,9 @@ pub struct Session {
     keep: Duration,
     events: Vec<(String, Instant)>,
     clips: Vec<(PathBuf, String, Instant, Instant)>,
+    /// Pistas fijadas por la primera parte (todas las partes deben tener las mismas).
+    specs: Vec<TrackSpec>,
+    track_names: Vec<String>,
 }
 
 impl Session {
@@ -514,7 +571,13 @@ impl Session {
         std::fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear {}: {e}", dir.display()))?;
         crate::platform::hide_path(&buffer_root);
         let _ = std::fs::write(dir.join("session.txt"), format!("{game_exe}\n{}\n", cfg.mode.as_str()));
-        let part = Part::spawn(cfg, ffmpeg, enc, &dir, 0)?;
+        let wanted = crate::platform::track_specs(cfg, game_exe);
+        let (part, info) = Part::spawn(cfg, ffmpeg, enc, &dir, 0, &wanted, false)?;
+        let specs = info.as_ref().map(|i| i.tracks.clone()).unwrap_or_default();
+        let track_names: Vec<String> = specs.iter().map(|t| t.name.clone()).collect();
+        if track_names.len() > 1 {
+            log!("Pistas de audio: {}", track_names.join(", "));
+        }
         log!("Grabando {game_exe} con {} en {}", enc.label, dir.display());
         Ok(Session {
             part: Some(part),
@@ -535,7 +598,9 @@ impl Session {
             inflight: Vec::new(),
             keep: Duration::from_secs(cfg.pre.max(cfg.manual_secs) as u64 + 10),
             events: Vec::new(),
-        clips: Vec::new(),
+            clips: Vec::new(),
+            specs,
+            track_names,
         })
     }
 
@@ -605,6 +670,7 @@ impl Session {
             faststart: true,
             done: Some(done),
             notice: Some(format!("Clip guardado: {label}")),
+            titles: self.track_names.clone(),
         });
     }
 
@@ -659,8 +725,8 @@ impl Session {
         if self.fast_fails > 0 {
             std::thread::sleep(Duration::from_millis(300 * self.fast_fails as u64));
         }
-        match Part::spawn(&self.cfg, &self.ffmpeg, &self.enc, &self.dir, self.next_idx) {
-            Ok(p) => {
+        match Part::spawn(&self.cfg, &self.ffmpeg, &self.enc, &self.dir, self.next_idx, &self.specs, true) {
+            Ok((p, _)) => {
                 self.next_idx += 1;
                 self.part = Some(p);
                 true
@@ -717,6 +783,7 @@ impl Session {
                 faststart: false,
                 done: None,
                 notice: Some(format!("Partida guardada ({})", self.game)),
+                titles: self.track_names.clone(),
             });
         }
         let _ = jobs.send(Job::RemoveDir(self.dir.clone()));
@@ -742,6 +809,7 @@ impl Session {
                 .map(|(f, l, s, e)| LibClip { file: f.clone(), label: l.clone(), t: t_of(*s), dur: secs_between(*s, *e) })
                 .collect(),
             events: self.events.iter().map(|(l, at)| (l.clone(), t_of(*at))).collect(),
+            tracks: self.track_names.clone(),
         };
         let _ = jobs.send(Job::Library { out_root: self.out_root.clone(), entry, open: open_player });
         log!("Grabación detenida ({})", self.game);

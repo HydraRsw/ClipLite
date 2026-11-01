@@ -128,6 +128,19 @@ pub fn find_ffmpeg(configured: &str) -> Option<PathBuf> {
     None
 }
 
+/// Codifica un texto para usarlo en una URL (deja tal cual letras, números y - . _ ~ / :).
+pub fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~/:".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 /// Espera a que termine un proceso con límite de tiempo; si no, lo mata.
 pub fn wait_timeout(child: &mut Child, timeout: Duration) -> Option<std::process::ExitStatus> {
     let start = Instant::now();

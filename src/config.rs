@@ -44,6 +44,9 @@ pub struct Config {
     pub sound: bool,
     pub notifications: bool,
     pub open_player: bool,
+    pub app_tracks: bool,
+    pub track_apps: Vec<String>,
+    pub mic: bool,
     pub ffmpeg: String,
 }
 
@@ -92,6 +95,9 @@ impl Default for Config {
             sound: true,
             notifications: true,
             open_player: true,
+            app_tracks: true,
+            track_apps: ["Discord.exe", "Spotify.exe"].iter().map(|s| s.to_string()).collect(),
+            mic: false,
             ffmpeg: String::new(),
         }
     }
@@ -163,6 +169,9 @@ impl Config {
                 "clips_en_modo_completa" => self.clips_in_full = parse_bool(v).unwrap_or(self.clips_in_full),
                 "sonido" => self.sound = parse_bool(v).unwrap_or(self.sound),
                 "notificaciones" => self.notifications = parse_bool(v).unwrap_or(self.notifications),
+                "pistas_por_aplicacion" => self.app_tracks = parse_bool(v).unwrap_or(self.app_tracks),
+                "apps_con_pista_propia" => self.track_apps = parse_list(v),
+                "microfono" | "micrófono" => self.mic = parse_bool(v).unwrap_or(self.mic),
                 "abrir_reproductor" => self.open_player = parse_bool(v).unwrap_or(self.open_player),
                 "ffmpeg" => self.ffmpeg = v.to_string(),
                 _ => {}
@@ -201,6 +210,13 @@ cursor = {cursor}
 audio = {audio}
 # Si notas el audio desincronizado, ajústalo aquí (milisegundos, puede ser negativo)
 desfase_audio_ms = {offset}
+# Guardar el juego y cada aplicación en pistas de audio separadas (para silenciarlas luego en el
+# reproductor). La pista 1 siempre es la mezcla completa. Requiere Windows 11 o Windows 10 reciente.
+pistas_por_aplicacion = {apptracks}
+# Aplicaciones (además del juego) con pista propia, si están abiertas al empezar la partida
+apps_con_pista_propia = {trackapps}
+# Grabar también tu micrófono (en su propia pista y en la mezcla)
+microfono = {mic}
 
 # ---------------- Clips ----------------
 # Segundos antes y después de cada momento importante
@@ -261,6 +277,9 @@ ffmpeg = {ffmpeg}
             sonido = b(self.sound),
             notif = b(self.notifications),
             player = b(self.open_player),
+            apptracks = b(self.app_tracks),
+            trackapps = self.track_apps.join(", "),
+            mic = b(self.mic),
             ffmpeg = self.ffmpeg,
         );
         std::fs::write(path, text)

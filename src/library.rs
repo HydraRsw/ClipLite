@@ -60,6 +60,7 @@ pub fn add(out_root: &Path, e: LibEntry) -> std::io::Result<(PathBuf, String)> {
                     .collect(),
             ),
         ),
+        ("tracks".into(), Json::Arr(e.tracks.iter().map(|t| Json::str(t)).collect())),
         (
             "events".into(),
             Json::Arr(
@@ -115,6 +116,20 @@ fn write_html(out_root: &Path, list: &[Json]) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(out_root)?;
     std::fs::write(&path, page)?;
     Ok(path)
+}
+
+/// Dirección para abrir el reproductor: por el servidor local si está activo (permite silenciar
+/// pistas), o directamente el archivo .html.
+pub fn player_url(out_root: &Path, session: Option<&str>) -> String {
+    let frag = session.map(|id| format!("#s={}", crate::util::url_encode(id))).unwrap_or_default();
+    if let Some(base) = crate::server::base_url() {
+        let _ = ensure_html(out_root);
+        return format!("{base}{frag}");
+    }
+    let html = ensure_html(out_root);
+    let p = html.to_string_lossy().replace('\\', "/");
+    let p = p.trim_start_matches('/');
+    format!("file:///{}{frag}", crate::util::url_encode(p))
 }
 
 /// Asegura que la página exista y esté al día (para abrirla desde el menú).

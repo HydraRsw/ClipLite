@@ -5,7 +5,7 @@
 //  * Cliente HTTPS local para la API de League of Legends (WinHTTP).
 #![allow(non_snake_case, non_upper_case_globals, clippy::missing_transmute_annotations)]
 
-use crate::audio::{AudioFormat, Capture};
+use crate::audio::{AudioFormat, Capture, TrackSpec, TrackSrc, MULTI};
 use crate::config::{Config, Mode};
 use crate::controller::{Cmd, Controller, FetcherFactory, Notify, UiMsg};
 use crate::platform::Fetcher;
@@ -25,7 +25,7 @@ type HRESULT = i32;
 type WndProc = unsafe extern "system" fn(H, u32, usize, isize) -> isize;
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct GUID(u32, u16, u16, [u8; 8]);
 
 #[repr(C)]
@@ -144,6 +144,11 @@ extern "system" {
     fn GetLocalTime(t: *mut SYSTEMTIME);
     fn SetFileAttributesW(p: *const u16, a: u32) -> BOOL;
     fn GetFileAttributesW(p: *const u16) -> u32;
+    fn LoadLibraryW(name: *const u16) -> H;
+    fn GetProcAddress(m: H, name: *const u8) -> usize;
+    fn CreateEventW(attr: *const c_void, manual: BOOL, initial: BOOL, name: *const u16) -> H;
+    fn WaitForSingleObject(h: H, ms: u32) -> u32;
+    fn SetEvent(h: H) -> BOOL;
 }
 #[link(name = "ole32")]
 extern "system" {
@@ -310,33 +315,22 @@ pub fn install_cs2_cfg(port: u16) {
     }
 }
 
-fn url_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || b"-._~/:".contains(&b) {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
-
 /// Abre el reproductor como ventana de aplicación (Edge en modo app, incluido en Windows);
 /// si no está disponible, con el navegador predeterminado.
-pub fn open_player(html: &Path, session: Option<&str>) {
-    let mut url = format!("file:///{}", url_encode(&html.to_string_lossy().replace('\\', "/")));
-    if let Some(id) = session {
-        url.push_str("#s=");
-        url.push_str(&url_encode(id));
-    }
+pub fn open_url(url: &str) {
     unsafe {
         let args = w(&format!("--app=\"{url}\" --window-size=1440,920"));
         let r = ShellExecuteW(0, w("open").as_ptr(), w("msedge.exe").as_ptr(), args.as_ptr(), null(), 1);
         if r <= 32 {
-            ShellExecuteW(0, w("open").as_ptr(), wp(html).as_ptr(), null(), null(), 1);
+            ShellExecuteW(0, w("open").as_ptr(), w(url).as_ptr(), null(), null(), 1);
         }
     }
+}
+
+/// Abre el Explorador con el archivo seleccionado.
+pub fn reveal(p: &Path) {
+    let path = p.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{path}")).spawn();
 }
 
 fn autostart_enabled() -> bool {
@@ -353,6 +347,70 @@ fn set_autostart(on: bool) {
             RegDeleteKeyValueW(HKCU, w(RUN_KEY).as_ptr(), w("ClipLite").as_ptr());
         }
     }
+}
+
+/// (pid, pid del padre, nombre en minúsculas) de cada proceso.
+fn process_list() -> Vec<(u32, u32, String)> {
+    let mut out = Vec::new();
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(0x2, 0);
+        if snap == -1 {
+            return out;
+        }
+        let mut e: PROCESSENTRY32W = zeroed();
+        e.size = size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut e) != 0 {
+            loop {
+                let n = e.exe_file.iter().position(|&c| c == 0).unwrap_or(260);
+                out.push((e.pid, e.parent_pid, String::from_utf16_lossy(&e.exe_file[..n]).to_lowercase()));
+                if Process32NextW(snap, &mut e) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snap);
+    }
+    out
+}
+
+/// Proceso principal de una aplicación: el que no tiene como padre a otro proceso del mismo nombre
+/// (Discord, Chrome… abren muchos; capturando el principal se incluyen todos sus hijos).
+fn root_pid(procs: &[(u32, u32, String)], exe: &str) -> Option<u32> {
+    let exe = exe.to_lowercase();
+    let same: Vec<&(u32, u32, String)> = procs.iter().filter(|p| p.2 == exe).collect();
+    same.iter().find(|p| !same.iter().any(|q| q.0 == p.1)).or(same.first()).map(|p| p.0)
+}
+
+fn app_name(exe: &str) -> String {
+    let base = exe.trim_end_matches(".exe").trim_end_matches(".EXE");
+    let mut c = base.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => exe.to_string(),
+    }
+}
+
+/// Pistas para esta partida: mezcla completa + juego + apps configuradas abiertas + micrófono.
+pub fn track_specs(cfg: &Config, game_exe: &str) -> Vec<TrackSpec> {
+    let mut v = vec![TrackSpec { name: "Todo".into(), src: TrackSrc::System }];
+    if cfg.app_tracks {
+        let procs = process_list();
+        if let Some(pid) = root_pid(&procs, game_exe) {
+            v.push(TrackSpec { name: "Juego".into(), src: TrackSrc::Process(pid) });
+        }
+        for app in &cfg.track_apps {
+            if app.eq_ignore_ascii_case(game_exe) {
+                continue;
+            }
+            if let Some(pid) = root_pid(&procs, app) {
+                v.push(TrackSpec { name: app_name(app), src: TrackSrc::Process(pid) });
+            }
+        }
+    }
+    if cfg.mic {
+        v.push(TrackSpec { name: "Micrófono".into(), src: TrackSrc::Mic });
+    }
+    v
 }
 
 fn running_processes() -> Vec<String> {
@@ -442,17 +500,43 @@ fn http_get(h: &Http, path: &str) -> Option<String> {
     }
 }
 
-// ------------------------------------------------------------------ WASAPI loopback
+// ------------------------------------------------------------------ WASAPI
 
 const CLSID_MMDeviceEnumerator: GUID = GUID(0xBCDE0395, 0xE52F, 0x467C, [0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E]);
 const IID_IMMDeviceEnumerator: GUID = GUID(0xA95664D2, 0x9614, 0x4F35, [0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6]);
 const IID_IAudioClient: GUID = GUID(0x1CB9AD4C, 0xDBFA, 0x4C32, [0xB1, 0x78, 0xC2, 0xF5, 0x68, 0xA7, 0x03, 0xB2]);
 const IID_IAudioCaptureClient: GUID = GUID(0xC8ADBD64, 0xE71E, 0x48A0, [0xA4, 0xDE, 0x18, 0x5C, 0x39, 0x5C, 0xD3, 0x17]);
+const IID_IUnknown: GUID = GUID(0x00000000, 0x0000, 0x0000, [0xC0, 0, 0, 0, 0, 0, 0, 0x46]);
+const IID_IAgileObject: GUID = GUID(0x94EA2B94, 0xE9CC, 0x49E0, [0xC0, 0xFF, 0xEE, 0x64, 0xCA, 0x8F, 0x5B, 0x90]);
+const IID_IActivateCompletion: GUID = GUID(0x41D949AB, 0x9862, 0x444A, [0x80, 0xF6, 0xC2, 0x61, 0x33, 0x4D, 0xA5, 0xEB]);
+
+const LOOPBACK: u32 = 0x0002_0000;
+const EVENTCALLBACK: u32 = 0x0004_0000;
+const AUTOCONVERT: u32 = 0x8000_0000 | 0x0800_0000; // AUTOCONVERTPCM | SRC_DEFAULT_QUALITY
+
+/// WAVEFORMATEX de 18 bytes.
+fn waveformat(tag: u16, rate: u32, channels: u16, bits: u16) -> [u8; 18] {
+    let align = channels * bits / 8;
+    let mut f = [0u8; 18];
+    f[0..2].copy_from_slice(&tag.to_le_bytes());
+    f[2..4].copy_from_slice(&channels.to_le_bytes());
+    f[4..8].copy_from_slice(&rate.to_le_bytes());
+    f[8..12].copy_from_slice(&(rate * align as u32).to_le_bytes());
+    f[12..14].copy_from_slice(&align.to_le_bytes());
+    f[14..16].copy_from_slice(&bits.to_le_bytes());
+    f
+}
 
 struct Wasapi {
     client: *mut c_void,
     capture: *mut c_void,
+    /// Formato que entrega `read` (tras convertir).
     fmt: AudioFormat,
+    /// Bytes por fotograma tal y como llegan de Windows.
+    raw_bpf: usize,
+    /// Llega en PCM de 16 bits y se convierte a float.
+    s16: bool,
+    event: H,
 }
 
 impl Drop for Wasapi {
@@ -462,58 +546,235 @@ impl Drop for Wasapi {
             stop(self.client);
             release(self.capture);
             release(self.client);
+            if self.event != 0 {
+                CloseHandle(self.event);
+            }
         }
     }
 }
 
-pub fn open_audio() -> Result<Box<dyn Capture>, String> {
+type InitFn = unsafe extern "system" fn(*mut c_void, i32, u32, i64, i64, *const u8, *const GUID) -> HRESULT;
+
+/// Inicializa un IAudioClient ya activado, obtiene el capturador y lo arranca.
+unsafe fn start_client(client: *mut c_void, fmt_bytes: &[u8], flags: u32, fmt: AudioFormat, raw_bpf: usize, s16: bool) -> Result<Wasapi, String> {
+    let init: InitFn = transmute(vt(client, 3));
+    let buffer = if flags & EVENTCALLBACK != 0 { 2_000_000 } else { 10_000_000 };
+    hr(init(client, 0, flags, buffer, 0, fmt_bytes.as_ptr(), null()), "Initialize")?;
+    let mut event = 0;
+    if flags & EVENTCALLBACK != 0 {
+        // Obligatorio con EVENTCALLBACK; no lo esperamos, leemos por sondeo.
+        event = CreateEventW(null(), 0, 0, null());
+        let set_event: unsafe extern "system" fn(*mut c_void, H) -> HRESULT = transmute(vt(client, 13));
+        hr(set_event(client, event), "SetEventHandle")?;
+    }
+    let get_service: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT = transmute(vt(client, 14));
+    let mut capture = null_mut();
+    hr(get_service(client, &IID_IAudioCaptureClient, &mut capture), "IAudioCaptureClient")?;
+    let start: unsafe extern "system" fn(*mut c_void) -> HRESULT = transmute(vt(client, 10));
+    if let Err(e) = hr(start(client), "Start") {
+        // El cliente lo libera quien llamó; aquí solo lo que se creó en esta función.
+        release(capture);
+        if event != 0 {
+            CloseHandle(event);
+        }
+        return Err(e);
+    }
+    Ok(Wasapi { client, capture, fmt, raw_bpf, s16, event })
+}
+
+/// Activa el IAudioClient del dispositivo predeterminado de salida (flow 0) o de entrada (flow 1).
+unsafe fn endpoint_client(flow: i32) -> Result<*mut c_void, String> {
+    let mut en = null_mut();
+    hr(CoCreateInstance(&CLSID_MMDeviceEnumerator, null_mut(), 0x17, &IID_IMMDeviceEnumerator, &mut en), "MMDeviceEnumerator")?;
+    let get_default: unsafe extern "system" fn(*mut c_void, i32, i32, *mut *mut c_void) -> HRESULT = transmute(vt(en, 4));
+    let mut dev = null_mut();
+    let r = get_default(en, flow, 0, &mut dev);
+    release(en);
+    hr(r, if flow == 0 { "no hay dispositivo de salida de audio" } else { "no hay micrófono" })?;
+    let activate: unsafe extern "system" fn(*mut c_void, *const GUID, u32, *mut c_void, *mut *mut c_void) -> HRESULT = transmute(vt(dev, 3));
+    let mut client = null_mut();
+    let r = activate(dev, &IID_IAudioClient, 0x17, null_mut(), &mut client);
+    release(dev);
+    hr(r, "IAudioClient")?;
+    Ok(client)
+}
+
+/// Salida del sistema (loopback) o micrófono. Con `multi` se pide 48 kHz estéreo float
+/// (Windows convierte si hace falta); si no, el formato nativo del dispositivo.
+unsafe fn open_endpoint(flow: i32, multi: bool) -> Result<Wasapi, String> {
+    let loop_flag = if flow == 0 { LOOPBACK } else { 0 };
+    if multi {
+        let client = endpoint_client(flow)?;
+        let f = waveformat(3, 48_000, 2, 32);
+        match start_client(client, &f, loop_flag | AUTOCONVERT, MULTI, 8, false) {
+            Ok(wsp) => return Ok(wsp),
+            Err(e) => {
+                release(client);
+                if flow != 0 {
+                    return Err(e);
+                }
+                log!("Audio: 48 kHz estéreo no disponible ({e}); se usa el formato del dispositivo");
+            }
+        }
+    }
+    let client = endpoint_client(flow)?;
+    let get_mix: unsafe extern "system" fn(*mut c_void, *mut *mut u8) -> HRESULT = transmute(vt(client, 8));
+    let mut wf: *mut u8 = null_mut();
+    if let Err(e) = hr(get_mix(client, &mut wf), "GetMixFormat") {
+        release(client);
+        return Err(e);
+    }
+    let rd16 = |o: usize| std::ptr::read_unaligned(wf.add(o) as *const u16);
+    let rd32 = |o: usize| std::ptr::read_unaligned(wf.add(o) as *const u32);
+    let tag = rd16(0);
+    let float = tag == 3 || (tag == 0xFFFE && rd16(16) >= 22 && rd32(24) == 3);
+    let fmt = AudioFormat { channels: rd16(2), rate: rd32(4), bits: rd16(14), float };
+    let size = 18 + rd16(16) as usize;
+    let bytes = std::slice::from_raw_parts(wf, size).to_vec();
+    CoTaskMemFree(wf as *mut c_void);
+    match start_client(client, &bytes, loop_flag, fmt, fmt.bytes_per_frame(), false) {
+        Ok(wsp) => Ok(wsp),
+        Err(e) => {
+            release(client);
+            Err(e)
+        }
+    }
+}
+
+// --- Captura de una sola aplicación (Windows 10 2004+/Windows 11) ---
+
+#[repr(C)]
+struct ActivationParams {
+    activation_type: u32, // 1 = PROCESS_LOOPBACK
+    pid: u32,
+    mode: u32, // 0 = incluir el proceso y sus hijos
+}
+
+#[repr(C)]
+struct PropVariantBlob {
+    vt: u16, // VT_BLOB = 65
+    r1: u16,
+    r2: u16,
+    r3: u16,
+    cb: u32,
+    pad: u32,
+    data: *const u8,
+}
+
+/// Objeto COM mínimo que recibe el aviso de "activación terminada".
+#[repr(C)]
+struct Handler {
+    vtbl: *const HandlerVtbl,
+    event: H,
+    refs: std::sync::atomic::AtomicU32,
+}
+#[repr(C)]
+struct HandlerVtbl {
+    qi: unsafe extern "system" fn(*mut Handler, *const GUID, *mut *mut c_void) -> HRESULT,
+    add_ref: unsafe extern "system" fn(*mut Handler) -> u32,
+    release: unsafe extern "system" fn(*mut Handler) -> u32,
+    completed: unsafe extern "system" fn(*mut Handler, *mut c_void) -> HRESULT,
+}
+static HANDLER_VTBL: HandlerVtbl = HandlerVtbl { qi: h_qi, add_ref: h_add_ref, release: h_release, completed: h_completed };
+
+unsafe extern "system" fn h_qi(this: *mut Handler, riid: *const GUID, out: *mut *mut c_void) -> HRESULT {
+    let id = *riid;
+    if id == IID_IUnknown || id == IID_IActivateCompletion || id == IID_IAgileObject {
+        *out = this as *mut c_void;
+        h_add_ref(this);
+        0
+    } else {
+        *out = null_mut();
+        0x8000_4002u32 as i32 // E_NOINTERFACE
+    }
+}
+unsafe extern "system" fn h_add_ref(this: *mut Handler) -> u32 {
+    (*this).refs.fetch_add(1, Ordering::SeqCst) + 1
+}
+unsafe extern "system" fn h_release(this: *mut Handler) -> u32 {
+    let n = (*this).refs.fetch_sub(1, Ordering::SeqCst) - 1;
+    if n == 0 {
+        CloseHandle((*this).event);
+        drop(Box::from_raw(this));
+    }
+    n
+}
+unsafe extern "system" fn h_completed(this: *mut Handler, _op: *mut c_void) -> HRESULT {
+    SetEvent((*this).event);
+    0
+}
+
+type ActivateFn = unsafe extern "system" fn(*const u16, *const GUID, *const PropVariantBlob, *mut c_void, *mut *mut c_void) -> HRESULT;
+
+unsafe fn open_process(pid: u32) -> Result<Wasapi, String> {
+    // Primero 48 kHz float; si no, PCM 16 bits (el formato del ejemplo oficial) y se convierte.
+    // Un IAudioClient no se puede reinicializar tras un fallo: para el segundo intento se activa otro.
+    let client = open_process_client(pid)?;
+    let f32fmt = waveformat(3, 48_000, 2, 32);
+    match start_client(client, &f32fmt, LOOPBACK | EVENTCALLBACK | AUTOCONVERT, MULTI, 8, false) {
+        Ok(wsp) => Ok(wsp),
+        Err(e1) => {
+            release(client);
+            let client = open_process_client(pid)?;
+            let s16fmt = waveformat(1, 48_000, 2, 16);
+            start_client(client, &s16fmt, LOOPBACK | EVENTCALLBACK, MULTI, 4, true).map_err(|e2| {
+                release(client);
+                format!("{e1}; {e2}")
+            })
+        }
+    }
+}
+
+/// Activa otro IAudioClient para el mismo proceso (sin inicializar).
+unsafe fn open_process_client(pid: u32) -> Result<*mut c_void, String> {
+    // Se carga en tiempo de ejecución: en Windows antiguos simplemente no hay pistas por aplicación.
+    let lib = LoadLibraryW(w("mmdevapi.dll").as_ptr());
+    let f = if lib != 0 { GetProcAddress(lib, b"ActivateAudioInterfaceAsync\0".as_ptr()) } else { 0 };
+    if f == 0 {
+        return Err("esta versión de Windows no permite capturar una sola aplicación".into());
+    }
+    let activate: ActivateFn = transmute(f);
+    let params = ActivationParams { activation_type: 1, pid, mode: 0 };
+    let pv = PropVariantBlob { vt: 65, r1: 0, r2: 0, r3: 0, cb: size_of::<ActivationParams>() as u32, pad: 0, data: &params as *const _ as *const u8 };
+    let event = CreateEventW(null(), 1, 0, null());
+    let handler = Box::into_raw(Box::new(Handler { vtbl: &HANDLER_VTBL, event, refs: std::sync::atomic::AtomicU32::new(1) }));
+    let mut op = null_mut();
+    let r = activate(w("VAD\\Process_Loopback").as_ptr(), &IID_IAudioClient, &pv, handler as *mut c_void, &mut op);
+    if r < 0 {
+        h_release(handler);
+        return Err(format!("ActivateAudioInterfaceAsync (0x{:08X}): requiere Windows 10 2004 o superior", r as u32));
+    }
+    let ok = WaitForSingleObject(event, 5000) == 0;
+    let (mut result, mut unk): (HRESULT, *mut c_void) = (-1, null_mut());
+    if ok {
+        let get_result: unsafe extern "system" fn(*mut c_void, *mut HRESULT, *mut *mut c_void) -> HRESULT = transmute(vt(op, 3));
+        get_result(op, &mut result, &mut unk);
+    }
+    release(op);
+    h_release(handler);
+    hr(if ok { result } else { -1 }, "activar captura de la aplicación")?;
+    let qi: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT = transmute(vt(unk, 0));
+    let mut client = null_mut();
+    let r = qi(unk, &IID_IAudioClient, &mut client);
+    release(unk);
+    hr(r, "IAudioClient de la aplicación")?;
+    Ok(client)
+}
+
+/// Abre una fuente de audio. Con `multi`, todas entregan 48 kHz estéreo float.
+pub fn open_source(src: &TrackSrc, multi: bool) -> Result<Box<dyn Capture>, String> {
     unsafe {
         CoInitializeEx(null(), 0 /* COINIT_MULTITHREADED */);
-        let mut en = null_mut();
-        hr(CoCreateInstance(&CLSID_MMDeviceEnumerator, null_mut(), 0x17, &IID_IMMDeviceEnumerator, &mut en), "MMDeviceEnumerator")?;
-        let get_default: unsafe extern "system" fn(*mut c_void, i32, i32, *mut *mut c_void) -> HRESULT = transmute(vt(en, 4));
-        let mut dev = null_mut();
-        let r = get_default(en, 0 /* eRender */, 0 /* eConsole */, &mut dev);
-        release(en);
-        hr(r, "no hay dispositivo de salida de audio")?;
-
-        let activate: unsafe extern "system" fn(*mut c_void, *const GUID, u32, *mut c_void, *mut *mut c_void) -> HRESULT = transmute(vt(dev, 3));
-        let mut client = null_mut();
-        let r = activate(dev, &IID_IAudioClient, 0x17, null_mut(), &mut client);
-        release(dev);
-        hr(r, "IAudioClient")?;
-
-        let get_mix: unsafe extern "system" fn(*mut c_void, *mut *mut u8) -> HRESULT = transmute(vt(client, 8));
-        let mut wf: *mut u8 = null_mut();
-        if let Err(e) = hr(get_mix(client, &mut wf), "GetMixFormat") {
-            release(client);
-            return Err(e);
+        let wsp = match src {
+            TrackSrc::System => open_endpoint(0, multi)?,
+            TrackSrc::Mic => open_endpoint(1, true)?,
+            TrackSrc::Process(pid) => open_process(*pid)?,
+        };
+        let f = wsp.fmt;
+        if *src == TrackSrc::System {
+            log!("Audio: {} Hz, {} canales, {} bits{}", f.rate, f.channels, f.bits, if f.float { " float" } else { "" });
         }
-        let rd16 = |o: usize| std::ptr::read_unaligned(wf.add(o) as *const u16);
-        let rd32 = |o: usize| std::ptr::read_unaligned(wf.add(o) as *const u32);
-        let tag = rd16(0);
-        let float = tag == 3 || (tag == 0xFFFE && rd16(16) >= 22 && rd32(24) == 3);
-        let fmt = AudioFormat { channels: rd16(2), rate: rd32(4), bits: rd16(14), float };
-
-        let init: unsafe extern "system" fn(*mut c_void, i32, u32, i64, i64, *const u8, *const GUID) -> HRESULT = transmute(vt(client, 3));
-        // Modo compartido + LOOPBACK, búfer de 1 s (no cuesta nada y tolera pausas del hilo).
-        let r = init(client, 0, 0x0002_0000, 10_000_000, 0, wf, null());
-        CoTaskMemFree(wf as *mut c_void);
-        if let Err(e) = hr(r, "Initialize(loopback)") {
-            release(client);
-            return Err(e);
-        }
-        let get_service: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT = transmute(vt(client, 14));
-        let mut capture = null_mut();
-        if let Err(e) = hr(get_service(client, &IID_IAudioCaptureClient, &mut capture), "IAudioCaptureClient") {
-            release(client);
-            return Err(e);
-        }
-        let start: unsafe extern "system" fn(*mut c_void) -> HRESULT = transmute(vt(client, 10));
-        let w = Wasapi { client, capture, fmt };
-        hr(start(client), "Start")?;
-        log!("Audio: {} Hz, {} canales, {} bits{}", fmt.rate, fmt.channels, fmt.bits, if float { " float" } else { "" });
-        Ok(Box::new(w))
+        Ok(Box::new(wsp))
     }
 }
 
@@ -526,7 +787,6 @@ impl Capture for Wasapi {
             let next: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT = transmute(vt(self.capture, 5));
             let get: unsafe extern "system" fn(*mut c_void, *mut *mut u8, *mut u32, *mut u32, *mut u64, *mut u64) -> HRESULT = transmute(vt(self.capture, 3));
             let rel: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT = transmute(vt(self.capture, 4));
-            let bpf = self.fmt.bytes_per_frame();
             loop {
                 let mut n = 0u32;
                 hr(next(self.capture, &mut n), "GetNextPacketSize")?;
@@ -535,11 +795,21 @@ impl Capture for Wasapi {
                 }
                 let (mut data, mut frames, mut flags) = (null_mut(), 0u32, 0u32);
                 hr(get(self.capture, &mut data, &mut frames, &mut flags, null_mut(), null_mut()), "GetBuffer")?;
-                let bytes = frames as usize * bpf;
-                if flags & 0x2 != 0 || data.is_null() {
-                    out.resize(out.len() + bytes, 0); // AUDCLNT_BUFFERFLAGS_SILENT
+                let raw = frames as usize * self.raw_bpf;
+                let silent = flags & 0x2 != 0 || data.is_null();
+                if self.s16 {
+                    if silent {
+                        out.resize(out.len() + frames as usize * 8, 0);
+                    } else {
+                        for c in std::slice::from_raw_parts(data, raw).chunks_exact(2) {
+                            let v = i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0;
+                            out.extend_from_slice(&v.to_le_bytes());
+                        }
+                    }
+                } else if silent {
+                    out.resize(out.len() + raw, 0); // AUDCLNT_BUFFERFLAGS_SILENT
                 } else {
-                    out.extend_from_slice(std::slice::from_raw_parts(data, bytes));
+                    out.extend_from_slice(std::slice::from_raw_parts(data, raw));
                 }
                 rel(self.capture, frames);
             }

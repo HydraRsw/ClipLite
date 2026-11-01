@@ -1,6 +1,10 @@
-// Audio del sistema → FFmpeg por una tubería.
-// Si no suena nada, el dispositivo no entrega datos; aquí rellenamos con silencio para que el
-// flujo sea continuo (si no, los segmentos y la sincronía se rompen).
+// Audio → FFmpeg por una sola tubería.
+//
+// Pista 1 ("Todo") = lo que suena por los altavoces; es la fuente principal y marca el reloj.
+// Pistas extra = una por aplicación (juego, Discord, Spotify…) y el micrófono. Todas se entregan
+// a 48 kHz estéreo float y se intercalan como canales de un único flujo: así comparten reloj y
+// quedan sincronizadas entre sí. FFmpeg las separa luego en pistas de audio con nombre.
+use std::collections::VecDeque;
 use std::io::Write;
 use std::process::ChildStdin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +20,10 @@ pub struct AudioFormat {
     pub bits: u16,
     pub float: bool,
 }
+
+/// Formato común de todas las pistas cuando hay varias.
+pub const MULTI: AudioFormat = AudioFormat { rate: 48_000, channels: 2, bits: 32, float: true };
+const MULTI_BPF: usize = 8;
 
 impl AudioFormat {
     pub fn ffmpeg_fmt(&self) -> &'static str {
@@ -33,11 +41,41 @@ impl AudioFormat {
     }
 }
 
-/// Fuente de audio (WASAPI loopback en Windows; generador de prueba en otros sistemas).
+/// Fuente de audio (WASAPI en Windows; generador de prueba en otros sistemas).
 pub trait Capture {
     fn format(&self) -> AudioFormat;
     /// Añade a `out` todo el audio disponible ahora mismo, sin bloquear.
     fn read(&mut self, out: &mut Vec<u8>) -> Result<(), String>;
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TrackSrc {
+    /// Todo lo que suena por la salida predeterminada.
+    System,
+    /// Solo una aplicación (y sus procesos hijos).
+    Process(u32),
+    /// Micrófono predeterminado.
+    Mic,
+}
+
+#[derive(Clone, Debug)]
+pub struct TrackSpec {
+    pub name: String,
+    pub src: TrackSrc,
+}
+
+/// Lo que FFmpeg necesita saber del flujo de audio.
+#[derive(Clone, Debug)]
+pub struct OutInfo {
+    pub fmt: AudioFormat,
+    /// Nombre de cada pista (la 0 es la mezcla completa).
+    pub tracks: Vec<TrackSpec>,
+}
+
+impl OutInfo {
+    pub fn mic_track(&self) -> Option<usize> {
+        self.tracks.iter().position(|t| t.src == TrackSrc::Mic)
+    }
 }
 
 pub type Clock = Arc<std::sync::Mutex<Option<Instant>>>;
@@ -49,31 +87,61 @@ pub struct AudioThread {
 }
 
 impl AudioThread {
-    /// Abre el dispositivo en su propio hilo y devuelve el formato para configurar FFmpeg.
-    pub fn start() -> Result<(AudioThread, AudioFormat), String> {
-        let (fmt_tx, fmt_rx) = sync_channel::<Result<AudioFormat, String>>(1);
+    /// Abre las fuentes en su propio hilo y devuelve el formato para configurar FFmpeg.
+    /// `strict`: mantener todas las pistas pedidas aunque alguna no se pueda abrir (se graba
+    /// en silencio), para que todas las partes de una partida tengan las mismas pistas.
+    pub fn start(specs: Vec<TrackSpec>, strict: bool) -> Result<(AudioThread, OutInfo), String> {
+        let (fmt_tx, fmt_rx) = sync_channel::<Result<OutInfo, String>>(1);
         let (in_tx, in_rx) = sync_channel::<(ChildStdin, Clock)>(1);
         let stop = Arc::new(AtomicBool::new(false));
         let stop2 = stop.clone();
         let th = std::thread::Builder::new()
             .name("audio".into())
             .spawn(move || {
-                let cap = match crate::platform::open_audio() {
+                let want_multi = specs.len() > 1;
+                let master = match crate::platform::open_source(&TrackSrc::System, want_multi) {
                     Ok(c) => c,
                     Err(e) => {
                         let _ = fmt_tx.send(Err(e));
                         return;
                     }
                 };
-                let fmt = cap.format();
-                let _ = fmt_tx.send(Ok(fmt));
+                let mut tracks = vec![specs[0].clone()];
+                let mut secs = Vec::new();
+                if want_multi && master.format() == MULTI {
+                    for spec in &specs[1..] {
+                        let cap = match crate::platform::open_source(&spec.src, true) {
+                            Ok(c) if c.format() == MULTI => Some(c),
+                            Ok(_) => {
+                                log!("Pista '{}': formato no compatible", spec.name);
+                                None
+                            }
+                            Err(e) => {
+                                log!("Pista '{}' no disponible: {e}", spec.name);
+                                None
+                            }
+                        };
+                        if cap.is_some() || strict {
+                            tracks.push(spec.clone());
+                            secs.push(Sec { cap, fifo: VecDeque::new(), primed: false, tmp: Vec::new(), name: spec.name.clone() });
+                        }
+                    }
+                } else if want_multi {
+                    log!("Pistas separadas no disponibles: la salida de audio no admite 48 kHz estéreo");
+                }
+                let fmt = if secs.is_empty() {
+                    master.format()
+                } else {
+                    AudioFormat { channels: 2 * (1 + secs.len() as u16), ..MULTI }
+                };
+                let _ = fmt_tx.send(Ok(OutInfo { fmt, tracks }));
                 if let Ok((stdin, clock)) = in_rx.recv() {
-                    pump(cap, stdin, fmt, &stop2, clock);
+                    pump(master, secs, stdin, &stop2, clock);
                 }
             })
             .map_err(|e| e.to_string())?;
-        match fmt_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(Ok(fmt)) => Ok((AudioThread { stop, stdin_tx: Some(in_tx), th: Some(th) }, fmt)),
+        match fmt_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(info)) => Ok((AudioThread { stop, stdin_tx: Some(in_tx), th: Some(th) }, info)),
             Ok(Err(e)) => {
                 let _ = th.join();
                 Err(e)
@@ -99,10 +167,73 @@ impl AudioThread {
     }
 }
 
-fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop: &AtomicBool, clock: Clock) {
-    let bpf = fmt.bytes_per_frame().max(1) as u64;
-    let bytes_per_sec = fmt.rate as u64 * bpf;
-    let align = |b: u64| b / bpf * bpf;
+/// Fuente secundaria con un pequeño colchón (40 ms) que absorbe el retraso variable de sus paquetes.
+struct Sec {
+    cap: Option<Box<dyn Capture>>,
+    fifo: VecDeque<u8>,
+    primed: bool,
+    tmp: Vec<u8>,
+    name: String,
+}
+
+const SEC_PREBUF: usize = 48_000 * MULTI_BPF * 40 / 1000;
+const SEC_MAX: usize = 48_000 * MULTI_BPF * 300 / 1000;
+
+impl Sec {
+    fn poll(&mut self) {
+        let Some(cap) = self.cap.as_mut() else { return };
+        self.tmp.clear();
+        if let Err(e) = cap.read(&mut self.tmp) {
+            log!("Pista '{}': se perdió la fuente ({e}); seguirá en silencio", self.name);
+            self.cap = None;
+            return;
+        }
+        self.fifo.extend(self.tmp.iter());
+        if self.fifo.len() > SEC_MAX {
+            let extra = (self.fifo.len() - SEC_PREBUF) / MULTI_BPF * MULTI_BPF;
+            self.fifo.drain(..extra);
+        }
+        if self.fifo.len() >= SEC_PREBUF {
+            self.primed = true;
+        }
+    }
+    fn reset(&mut self) {
+        self.fifo.clear();
+        self.primed = false;
+    }
+}
+
+/// Escribe `master` (N fotogramas de la pista principal) intercalando N fotogramas de cada pista extra.
+fn emit(stdin: &mut ChildStdin, master: &[u8], bpf: usize, secs: &mut [Sec], written: &mut u64) -> bool {
+    if master.is_empty() {
+        return true;
+    }
+    *written += master.len() as u64;
+    if secs.is_empty() {
+        return stdin.write_all(master).is_ok();
+    }
+    let frames = master.len() / bpf;
+    let mut out = Vec::with_capacity(frames * (bpf + MULTI_BPF * secs.len()));
+    for f in 0..frames {
+        out.extend_from_slice(&master[f * bpf..(f + 1) * bpf]);
+        for s in secs.iter_mut() {
+            if s.primed && s.fifo.len() >= MULTI_BPF {
+                out.extend(s.fifo.drain(..MULTI_BPF));
+            } else {
+                s.primed = false; // se vació: volver a llenar el colchón
+                out.extend_from_slice(&[0u8; MULTI_BPF]);
+            }
+        }
+    }
+    stdin.write_all(&out).is_ok()
+}
+
+fn pump(mut master: Box<dyn Capture>, mut secs: Vec<Sec>, mut stdin: ChildStdin, stop: &AtomicBool, clock: Clock) {
+    let fmt = master.format();
+    let bpf = fmt.bytes_per_frame().max(1);
+    let bpf64 = bpf as u64;
+    let bytes_per_sec = fmt.rate as u64 * bpf64;
+    let align = |b: u64| b / bpf64 * bpf64;
     let ms = |m: u64| align(bytes_per_sec * m / 1000);
     let zeros = vec![0u8; ms(100) as usize];
     let ms_of = |b: f64| b * 1000.0 / bytes_per_sec as f64;
@@ -110,14 +241,18 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
     // Objetivo: la muestra n del audio corresponde al instante (fotograma 0 del vídeo + n/frecuencia).
     //  1. Al conocer el fotograma 0 se alinea UNA vez (se descarta o se rellena lo que sobre/falte).
     //  2. Después se escribe el audio tal cual llega. Los paquetes de Windows llegan con retraso
-    //     variable: eso se tolera, nunca se recorta ni se rellena por ello (eso causaba cortes).
+    //     variable: eso se tolera, nunca se recorta ni se rellena por ello.
     //  3. Si el sistema deja de entregar audio (nada suena), se rellena con silencio.
     //  4. La pequeña desviación del reloj de la tarjeta se corrige quitando o duplicando una sola
     //     muestra cada 10 ms (inaudible) cuando el desfase medio supera 40 ms.
     let start = Instant::now();
     let mut written: u64 = 0;
     let mut buf: Vec<u8> = Vec::with_capacity(bytes_per_sec as usize / 5);
-    let _ = cap.read(&mut buf); // descartar lo capturado antes de arrancar
+    let _ = master.read(&mut buf); // descartar lo capturado antes de arrancar
+    for s in secs.iter_mut() {
+        s.poll();
+        s.reset();
+    }
     let mut device_ok = true;
     let mut last_reopen = Instant::now();
     let mut last_data = Instant::now();
@@ -128,18 +263,10 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
     let mut nudges: u64 = 0;
     let mut fills: u64 = 0;
 
-    let write = |stdin: &mut ChildStdin, data: &[u8], written: &mut u64| -> bool {
-        if data.is_empty() {
-            return true;
-        }
-        *written += data.len() as u64;
-        stdin.write_all(data).is_ok()
-    };
-
     'main: while !stop.load(Ordering::Relaxed) {
         buf.clear();
         if device_ok {
-            if let Err(e) = cap.read(&mut buf) {
+            if let Err(e) = master.read(&mut buf) {
                 log!("Audio: se perdió el dispositivo ({e}); se grabará silencio mientras tanto");
                 device_ok = false;
                 last_reopen = Instant::now();
@@ -147,13 +274,16 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
         } else if last_reopen.elapsed() > Duration::from_secs(2) {
             // Ej. se cambió de altavoces a auriculares: reintentar con el nuevo dispositivo.
             last_reopen = Instant::now();
-            if let Ok(c) = crate::platform::open_audio() {
+            if let Ok(c) = crate::platform::open_source(&TrackSrc::System, fmt == MULTI) {
                 if c.format() == fmt {
-                    cap = c;
+                    master = c;
                     device_ok = true;
                     log!("Audio: dispositivo recuperado");
                 }
             }
+        }
+        for s in secs.iter_mut() {
+            s.poll();
         }
 
         let video0 = clock.lock().ok().and_then(|g| *g);
@@ -163,13 +293,16 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
         // 1. Alineación inicial con el vídeo (una sola vez).
         if !aligned && video0.is_some() {
             aligned = true;
+            for s in secs.iter_mut() {
+                s.reset();
+            }
             if written > expected {
                 skip = written - expected;
             } else {
                 let mut left = expected - written;
                 while left > 0 {
                     let n = left.min(zeros.len() as u64) as usize;
-                    if !write(&mut stdin, &zeros[..n], &mut written) {
+                    if !emit(&mut stdin, &zeros[..n], bpf, &mut secs, &mut written) {
                         break 'main;
                     }
                     left -= n as u64;
@@ -180,14 +313,14 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
 
         if !buf.is_empty() {
             last_data = Instant::now();
-            let mut data: &[u8] = &buf;
+            let mut data: Vec<u8> = std::mem::take(&mut buf);
             if skip > 0 {
                 let k = skip.min(data.len() as u64) as usize;
-                data = &data[k..];
+                data.drain(..k);
                 skip -= k as u64;
             }
             // 4. Corrección de deriva, muy gradual.
-            if aligned && data.len() as u64 >= 4 * bpf {
+            if aligned && data.len() >= 4 * bpf {
                 let err = written as f64 + data.len() as f64 - expected as f64;
                 err_avg += (err - err_avg) * 0.02;
                 let e = ms_of(err_avg);
@@ -198,34 +331,32 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
                 }
                 if nudging {
                     nudges += 1;
-                    let b = bpf as usize;
                     if e > 0.0 {
-                        data = &data[..data.len() - b]; // adelantado: quitar una muestra
+                        data.truncate(data.len() - bpf); // adelantado: quitar una muestra
                     } else {
-                        let last = data[data.len() - b..].to_vec();
-                        if !write(&mut stdin, data, &mut written) || !write(&mut stdin, &last, &mut written) {
-                            break 'main;
-                        }
-                        data = &[];
+                        let last = data[data.len() - bpf..].to_vec();
+                        data.extend_from_slice(&last); // atrasado: repetir una muestra
                     }
                 }
             }
-            if !write(&mut stdin, data, &mut written) {
+            if !emit(&mut stdin, &data, bpf, &mut secs, &mut written) {
                 break 'main;
             }
+            buf = data;
             // Protección ante un desfase enorme (p. ej. el sistema se quedó congelado).
             if aligned && written > expected + ms(500) {
                 skip = written - expected;
             }
         } else if last_data.elapsed() > Duration::from_millis(100) {
-            // 3. No suena nada: rellenar con silencio hasta el instante actual.
+            // 3. No suena nada por los altavoces: rellenar con silencio hasta el instante actual
+            //    (las pistas extra, p. ej. el micrófono, siguen avanzando con sus datos).
             let lag = expected.saturating_sub(written);
             if lag >= ms(20) {
                 fills += 1;
                 let mut left = lag;
                 while left > 0 {
                     let n = left.min(zeros.len() as u64) as usize;
-                    if !write(&mut stdin, &zeros[..n], &mut written) {
+                    if !emit(&mut stdin, &zeros[..n], bpf, &mut secs, &mut written) {
                         break 'main;
                     }
                     left -= n as u64;

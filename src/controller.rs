@@ -85,6 +85,7 @@ impl Controller {
 
     pub fn run(mut self, rx: Receiver<Cmd>) {
         let _ = std::fs::create_dir_all(&self.cfg.output_dir);
+        crate::server::start(self.cfg.output_dir.clone(), self.ffmpeg.clone());
         recorder::recover_leftovers(&self.cfg.output_dir.join(".buffer"), &self.cfg.output_dir, &self.jobs);
         self.encoder = recorder::probe_encoder(&self.ffmpeg, &self.cfg);
         match &self.encoder {
@@ -169,6 +170,7 @@ impl Controller {
             Cmd::SetFolder(p) => {
                 self.cfg.output_dir = p;
                 self.save_cfg();
+                crate::server::set_root(self.cfg.output_dir.clone());
                 let _ = std::fs::create_dir_all(&self.cfg.output_dir);
                 let extra = if self.session.is_some() { " (se aplicará en la próxima grabación)" } else { "" };
                 self.notice(&format!("Carpeta: {}{extra}", self.cfg.output_dir.display()));
@@ -180,14 +182,14 @@ impl Controller {
                     || new.bitrate_mbps != self.cfg.bitrate_mbps
                     || new.monitor != self.cfg.monitor;
                 self.cfg = new;
+                crate::server::set_root(self.cfg.output_dir.clone());
                 if enc_changed {
                     self.encoder = recorder::probe_encoder(&self.ffmpeg, &self.cfg);
                 }
                 self.notice("Configuración recargada");
             }
             Cmd::OpenLibrary => {
-                let html = crate::library::ensure_html(&self.cfg.output_dir);
-                crate::platform::open_player(&html, None);
+                crate::platform::open_url(&crate::library::player_url(&self.cfg.output_dir, None));
             }
             Cmd::Notice(msg) => self.notice(&msg),
             Cmd::Quit => {}

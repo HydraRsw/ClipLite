@@ -64,6 +64,17 @@ video#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;back
 .toast.show{opacity:1}
 /* línea de tiempo */
 .tlwrap{padding:10px 4px 0;flex:none}
+.tracks{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 4px 0;font-size:13px;color:var(--dim);flex:none}
+.trk{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--text)}
+.trk:hover{background:var(--panel2)}
+.trk .box{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--faint);display:grid;place-items:center;font-size:10px;line-height:1}
+.trk.on .box{background:var(--accent);border-color:var(--accent);color:#fff}
+.trk.off{color:var(--faint);text-decoration:line-through}
+.trk:disabled{opacity:.5;cursor:default}
+.tracks .note{font-size:12px;color:var(--faint)}
+.tracks .grow{flex:1}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--faint);border-top-color:var(--text);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
 .tlbar{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px;padding-bottom:6px}
 .tlbar .grow{flex:1}
 .tlbar button{padding:4px 9px;border-radius:6px;color:var(--dim);font-size:12px}
@@ -170,7 +181,12 @@ sessions.reverse();
 const games = [...new Set(sessions.map(s => s.game))];
 
 // ------------------------------------------------------------- estado
-const st = { view: "all", game: "", q: "", sel: null, playing: null /* null = partida; objeto clip */ };
+const st = { view: "all", game: "", q: "", sel: null, playing: null /* null = partida; objeto clip */, muted: new Set(), busy: false };
+// Con ClipLite abierto el reproductor se sirve desde 127.0.0.1 y puede mezclar pistas de audio.
+const API = location.protocol.startsWith("http") ? new URLSearchParams(location.search).get("t") : null;
+const tracksOf = s => (s && s.tracks && s.tracks.length) ? s.tracks : ["Todo"];
+const TRACK_ICON = n => /juego/i.test(n) ? "🎮" : /discord|teamspeak|skype|teams/i.test(n) ? "💬" : /micr/i.test(n) ? "🎙" : /spotify|music|música/i.test(n) ? "🎵" : "🔊";
+const api = (what, params) => fetch(`/api/${what}?t=${API}&` + new URLSearchParams(params)).then(r => r.json());
 let video, tl;
 
 function filtered() {
@@ -221,7 +237,8 @@ function render() {
     h("h2", { id: "title" }), h("span", { class: "meta", id: "meta" }),
     h("div", { class: "grow" }),
     s.match ? h("button", { class: "chip", id: "fullBtn", onclick: () => playMatch(0) }, "▶ Partida completa") : null,
-    h("button", { class: "chip", onclick: copyPath, title: "Copiar la ruta del vídeo" }, "Copiar ruta")));
+    API ? h("button", { class: "chip", onclick: reveal, title: "Abrir el Explorador con el vídeo seleccionado" }, "Mostrar en carpeta")
+        : h("button", { class: "chip", onclick: copyPath, title: "Copiar la ruta del vídeo" }, "Copiar ruta")));
 
   video = h("video", { id: "v", controls: "", preload: "metadata" });
   video.addEventListener("error", () => showMsg("No se encuentra este vídeo.\n¿Lo moviste, renombraste o borraste?"));
@@ -231,6 +248,8 @@ function render() {
   video.addEventListener("loadedmetadata", () => { if (!st.playing) buildTimelineOnce(); });
   lastT = 0;
   left.append(h("div", { class: "player" }, video, h("div", { class: "msg", id: "msg" }), h("div", { class: "toast", id: "toast" })));
+  left.append(h("div", { class: "tracks", id: "tracks" }));
+  renderTracks();
 
   const speeds = [0.25, 0.5, 1, 2].map(r => h("button", { class: r === 1 ? "on" : "", "data-r": r, onclick: e => setRate(r) }, r + "×"));
   tl = h("div", { class: "timeline", id: "tl" });
@@ -314,14 +333,31 @@ function toggleFav(file, el) {
 
 // ------------------------------------------------------------- reproducción
 function select(s) {
+  if (s !== st.sel) st.muted = new Set();
   st.sel = s;
   try { history.replaceState(null, "", "#s=" + encodeURIComponent(s.id)); } catch (e) {}
   render();
 }
 function pickFirst() { const f = filtered(); if (!f.includes(st.sel)) st.sel = f[0] || null; }
 
-function load(rel, at, autoplay) {
-  const want = src(rel);
+let loadSeq = 0;
+/** Carga un vídeo (original o con las pistas silenciadas) en el instante `at`. */
+async function load(rel, at, autoplay) {
+  const seq = ++loadSeq;
+  let want = src(rel);
+  if (st.muted.size && API) {
+    st.busy = true; renderTracks();
+    try {
+      const r = await api("mix", { file: rel, keep: keepList().join(",") });
+      if (r.error) throw new Error(r.error);
+      want = r.url;
+    } catch (e) {
+      toast("No se pudo preparar el audio");
+    }
+    st.busy = false;
+    if (seq !== loadSeq) return; // llegó otra petición mientras tanto
+    renderTracks();
+  }
   if (video.getAttribute("src") !== want) {
     video.setAttribute("src", want);
     video.addEventListener("loadedmetadata", () => { video.currentTime = at || 0; if (autoplay !== false) video.play().catch(() => {}); }, { once: true });
@@ -454,12 +490,67 @@ let toastTimer;
 function toast(t) {
   const el = $("#toast"); if (!el) return;
   el.textContent = t; el.classList.add("show");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 1400);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 1400 + t.length * 40);
 }
 function showMsg(t) {
   const el = $("#msg"); if (!el) return;
   el.textContent = t; el.classList.toggle("show", !!t);
 }
+// ------------------------------------------------------------- pistas de audio
+function keepList() {
+  const n = tracksOf(st.sel).length;
+  return [...Array(n).keys()].slice(1).filter(k => !st.muted.has(k));
+}
+function currentRel() { return st.playing ? st.playing.file : st.sel.match; }
+
+function renderTracks() {
+  const box = $("#tracks");
+  if (!box) return;
+  box.innerHTML = "";
+  const names = tracksOf(st.sel);
+  if (names.length <= 1) { box.style.display = "none"; return; }
+  box.style.display = "";
+  box.append("Pistas de audio:");
+  names.forEach((n, k) => {
+    if (k === 0) return; // la 0 es la mezcla completa
+    const on = !st.muted.has(k);
+    box.append(h("button", {
+      class: "trk " + (on ? "on" : "off"), disabled: (!API || st.busy) ? "" : false,
+      title: API ? (on ? "Silenciar " : "Activar ") + n : "Abre el reproductor desde ClipLite para silenciar pistas",
+      onclick: () => toggleTrack(k),
+    }, h("span", { class: "box" }, on ? "✓" : ""), TRACK_ICON(n) + " " + n));
+  });
+  if (st.busy) box.append(h("span", { class: "spin" }), h("span", { class: "note" }, "Preparando audio…"));
+  else if (st.muted.size) box.append(h("span", { class: "note" }, "Se oyen solo las pistas marcadas"));
+  box.append(h("div", { class: "grow" }));
+  if (API && st.muted.size) box.append(h("button", { class: "chip", disabled: st.busy ? "" : false, onclick: saveCopy, title: "Guardar un vídeo nuevo con este audio, junto al original" }, "Guardar copia con este audio"));
+}
+
+function toggleTrack(k) {
+  if (!API || st.busy) return;
+  st.muted.has(k) ? st.muted.delete(k) : st.muted.add(k);
+  const t = video.currentTime, playing = !video.paused;
+  renderTracks();
+  load(currentRel(), t, playing);
+}
+
+async function saveCopy() {
+  const names = tracksOf(st.sel);
+  const suffix = "sin-" + [...st.muted].sort().map(k => names[k]).join("-");
+  st.busy = true; renderTracks();
+  try {
+    const r = await api("export", { file: currentRel(), keep: keepList().join(","), suffix });
+    if (r.error) throw new Error(r.error);
+    toast("Guardado: " + r.name);
+  } catch (e) { toast("No se pudo guardar la copia"); }
+  st.busy = false; renderTracks();
+}
+
+function reveal() {
+  const rel = currentRel() || (st.sel.clips[0] || {}).file;
+  if (rel) api("reveal", { file: rel }).catch(() => {});
+}
+
 function copyPath() {
   const rel = st.playing ? st.playing.file : st.sel.match || (st.sel.clips[0] || {}).file;
   if (!rel) return;
