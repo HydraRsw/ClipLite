@@ -105,19 +105,38 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
     let align = |b: u64| b / bpf * bpf;
     let ms = |m: u64| align(bytes_per_sec * m / 1000);
     let zeros = vec![0u8; ms(100) as usize];
+    let ms_of = |b: f64| b * 1000.0 / bytes_per_sec as f64;
 
-    // Sincronía: la muestra n del audio debe corresponder al instante (fotograma 0 del vídeo + n/frecuencia).
-    // Mientras no se conoce el fotograma 0 se usa este instante; en cuanto la grabadora lo mide,
-    // se corrige recortando o rellenando y a partir de ahí el audio queda atado al reloj del vídeo
-    // (eso también compensa la pequeña deriva del reloj de la tarjeta de sonido).
+    // Objetivo: la muestra n del audio corresponde al instante (fotograma 0 del vídeo + n/frecuencia).
+    //  1. Al conocer el fotograma 0 se alinea UNA vez (se descarta o se rellena lo que sobre/falte).
+    //  2. Después se escribe el audio tal cual llega. Los paquetes de Windows llegan con retraso
+    //     variable: eso se tolera, nunca se recorta ni se rellena por ello (eso causaba cortes).
+    //  3. Si el sistema deja de entregar audio (nada suena), se rellena con silencio.
+    //  4. La pequeña desviación del reloj de la tarjeta se corrige quitando o duplicando una sola
+    //     muestra cada 10 ms (inaudible) cuando el desfase medio supera 40 ms.
     let start = Instant::now();
     let mut written: u64 = 0;
     let mut buf: Vec<u8> = Vec::with_capacity(bytes_per_sec as usize / 5);
     let _ = cap.read(&mut buf); // descartar lo capturado antes de arrancar
     let mut device_ok = true;
     let mut last_reopen = Instant::now();
+    let mut last_data = Instant::now();
+    let mut aligned = false;
+    let mut skip: u64 = 0;
+    let mut err_avg: f64 = 0.0; // desfase medio (bytes): + adelantado, - atrasado
+    let mut nudging = false;
+    let mut nudges: u64 = 0;
+    let mut fills: u64 = 0;
 
-    while !stop.load(Ordering::Relaxed) {
+    let write = |stdin: &mut ChildStdin, data: &[u8], written: &mut u64| -> bool {
+        if data.is_empty() {
+            return true;
+        }
+        *written += data.len() as u64;
+        stdin.write_all(data).is_ok()
+    };
+
+    'main: while !stop.load(Ordering::Relaxed) {
         buf.clear();
         if device_ok {
             if let Err(e) = cap.read(&mut buf) {
@@ -137,34 +156,90 @@ fn pump(mut cap: Box<dyn Capture>, mut stdin: ChildStdin, fmt: AudioFormat, stop
             }
         }
 
-        let reference = clock.lock().ok().and_then(|g| *g).unwrap_or(start);
+        let video0 = clock.lock().ok().and_then(|g| *g);
+        let reference = video0.unwrap_or(start);
         let expected = align(Instant::now().saturating_duration_since(reference).as_micros() as u64 * bytes_per_sec / 1_000_000);
-        if !buf.is_empty() {
-            let max = expected + ms(30);
-            if written + buf.len() as u64 > max {
-                buf.truncate(align(max.saturating_sub(written)) as usize);
-            }
-            if !buf.is_empty() {
-                if stdin.write_all(&buf).is_err() {
-                    return;
+
+        // 1. Alineación inicial con el vídeo (una sola vez).
+        if !aligned && video0.is_some() {
+            aligned = true;
+            if written > expected {
+                skip = written - expected;
+            } else {
+                let mut left = expected - written;
+                while left > 0 {
+                    let n = left.min(zeros.len() as u64) as usize;
+                    if !write(&mut stdin, &zeros[..n], &mut written) {
+                        break 'main;
+                    }
+                    left -= n as u64;
                 }
-                written += buf.len() as u64;
             }
+            log!("Audio: alineado con el vídeo ({:+.0} ms)", -ms_of(skip as f64));
         }
-        let lag = expected.saturating_sub(written);
-        let threshold = if buf.is_empty() { ms(30) } else { ms(120) };
-        if lag >= threshold {
-            let mut left = lag;
-            while left > 0 {
-                let n = left.min(zeros.len() as u64) as usize;
-                if stdin.write_all(&zeros[..n]).is_err() {
-                    return;
+
+        if !buf.is_empty() {
+            last_data = Instant::now();
+            let mut data: &[u8] = &buf;
+            if skip > 0 {
+                let k = skip.min(data.len() as u64) as usize;
+                data = &data[k..];
+                skip -= k as u64;
+            }
+            // 4. Corrección de deriva, muy gradual.
+            if aligned && data.len() as u64 >= 4 * bpf {
+                let err = written as f64 + data.len() as f64 - expected as f64;
+                err_avg += (err - err_avg) * 0.02;
+                let e = ms_of(err_avg);
+                if e.abs() > 40.0 {
+                    nudging = true;
+                } else if e.abs() < 10.0 {
+                    nudging = false;
                 }
-                written += n as u64;
-                left -= n as u64;
+                if nudging {
+                    nudges += 1;
+                    let b = bpf as usize;
+                    if e > 0.0 {
+                        data = &data[..data.len() - b]; // adelantado: quitar una muestra
+                    } else {
+                        let last = data[data.len() - b..].to_vec();
+                        if !write(&mut stdin, data, &mut written) || !write(&mut stdin, &last, &mut written) {
+                            break 'main;
+                        }
+                        data = &[];
+                    }
+                }
+            }
+            if !write(&mut stdin, data, &mut written) {
+                break 'main;
+            }
+            // Protección ante un desfase enorme (p. ej. el sistema se quedó congelado).
+            if aligned && written > expected + ms(500) {
+                skip = written - expected;
+            }
+        } else if last_data.elapsed() > Duration::from_millis(100) {
+            // 3. No suena nada: rellenar con silencio hasta el instante actual.
+            let lag = expected.saturating_sub(written);
+            if lag >= ms(20) {
+                fills += 1;
+                let mut left = lag;
+                while left > 0 {
+                    let n = left.min(zeros.len() as u64) as usize;
+                    if !write(&mut stdin, &zeros[..n], &mut written) {
+                        break 'main;
+                    }
+                    left -= n as u64;
+                }
+                err_avg = 0.0;
             }
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     let _ = stdin.flush();
+    log!(
+        "Audio: fin. Desfase medio {:+.0} ms, {} microajustes de reloj, {} rellenos de silencio",
+        ms_of(err_avg),
+        nudges,
+        fills
+    );
 }

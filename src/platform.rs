@@ -69,17 +69,21 @@ pub fn open_player(html: &Path, session: Option<&str>) {
     log!("Abrir reproductor: {}#s={}", html.display(), session.unwrap_or(""));
 }
 
-/// Generador de prueba: tono de 440 Hz con un hueco de silencio (sin datos) entre los segundos 3 y 5,
-/// igual que hace WASAPI cuando no suena nada.
+/// Generador de prueba que imita a WASAPI: entrega paquetes de 10 ms con retraso variable
+/// (0-60 ms), su reloj va un poco desviado (CLIPLITE_DRIFT, en tanto por uno) y entre los
+/// segundos 3 y 5 no entrega nada (como cuando no suena nada).
 #[cfg(not(windows))]
 pub fn open_audio() -> Result<Box<dyn Capture>, String> {
-    Ok(Box::new(TestTone { start: std::time::Instant::now(), produced: 0 }))
+    let drift = std::env::var("CLIPLITE_DRIFT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0005);
+    Ok(Box::new(TestTone { start: std::time::Instant::now(), delivered: 0, rng: 0x1234_5678, drift }))
 }
 
 #[cfg(not(windows))]
 struct TestTone {
     start: std::time::Instant,
-    produced: u64,
+    delivered: u64,
+    rng: u64,
+    drift: f64,
 }
 
 #[cfg(not(windows))]
@@ -88,17 +92,20 @@ impl Capture for TestTone {
         crate::audio::AudioFormat { rate: 48_000, channels: 2, bits: 32, float: true }
     }
     fn read(&mut self, out: &mut Vec<u8>) -> Result<(), String> {
-        let t = self.start.elapsed().as_secs_f64();
-        let due = (t * 48_000.0) as u64;
-        if (3.0..5.0).contains(&t) {
-            self.produced = due; // silencio: el dispositivo no entrega nada
+        self.rng = self.rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let latency = (self.rng >> 33) % 60;
+        let t = (self.start.elapsed().as_secs_f64() - latency as f64 / 1000.0).max(0.0);
+        let produced = (t * 48_000.0 * (1.0 + self.drift)) as u64 / 480 * 480;
+        let dev_t = produced as f64 / 48_000.0 / (1.0 + self.drift);
+        if (3.0..5.0).contains(&dev_t) {
+            self.delivered = self.delivered.max(produced);
             return Ok(());
         }
-        while self.produced < due {
-            let s = ((self.produced as f64 / 48_000.0) * 440.0 * std::f64::consts::TAU).sin() as f32 * 0.2;
+        while self.delivered < produced {
+            let s = ((self.delivered as f64 / 48_000.0) * 440.0 * std::f64::consts::TAU).sin() as f32 * 0.2;
             out.extend_from_slice(&s.to_le_bytes());
             out.extend_from_slice(&s.to_le_bytes());
-            self.produced += 1;
+            self.delivered += 1;
         }
         Ok(())
     }
