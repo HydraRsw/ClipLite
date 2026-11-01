@@ -1,0 +1,21 @@
+[package]
+name = "cliplite"
+version = "1.0.0"
+edition = "2021"
+description = "Grabador de partidas y clips ultraligero para Windows (captura y codificación por GPU)"
+
+# Sin dependencias externas: solo la librería estándar de Rust + API nativa de Windows.
+
+[[bin]]
+name = "ClipLite"
+path = "src/main.rs"
+
+[features]
+# Solo para desarrollo: permite verificar el código de Windows desde otro sistema con `cargo check`.
+checkwin = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

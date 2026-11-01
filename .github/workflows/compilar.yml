@@ -1,0 +1,32 @@
+# Compila ClipLite.exe en los servidores de GitHub (Windows) y lo empaqueta junto con FFmpeg.
+# Sube el proyecto a un repositorio de GitHub; el zip listo aparece en la pestaña "Actions".
+name: Compilar ClipLite
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar
+        run: cargo build --release
+
+      - name: Empaquetar con FFmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/ClipLite.exe dist/
+          $ff = Get-ChildItem ffmpeg_tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $ff.FullName dist/
+          Copy-Item LEEME.md dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipLite-Windows
+          path: dist
