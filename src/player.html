@@ -109,6 +109,19 @@ video#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;back
 .clip .n{font-weight:600;display:flex;align-items:center;gap:6px}
 .clip .g{font-size:12px;color:var(--dim)}
 .clip .star{margin-left:auto}
+.clip .trash{color:var(--faint);font-size:14px;padding:0 2px;opacity:0;transition:.12s}
+.clip:hover .trash{opacity:1}
+.clip .trash:hover{color:var(--accent)}
+.chip.danger:hover{border-color:var(--accent);color:#fff}
+.space{padding:6px 22px 24px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;align-content:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
+.panel h3{margin:0 0 10px;font-size:15px}
+.big{font-size:30px;font-weight:700}
+.bar{height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;margin:6px 0 2px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
+.row:last-child{border:0}
+.panel p{color:var(--dim);font-size:13px;margin:8px 0}
 .empty{flex:1;display:grid;place-items:center;text-align:center;color:var(--dim);padding:40px}
 .empty h2{color:var(--text);margin:0 0 8px}
 kbd{font:11px "Segoe UI";background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px}
@@ -121,6 +134,7 @@ kbd{font:11px "Segoe UI";background:var(--panel2);border:1px solid var(--line);b
   <nav class="rail">
     <svg class="logo" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="#e5393f" stroke-width="3"/><circle cx="18" cy="18" r="7" fill="#e5393f"/></svg>
     <button id="navAll" class="on"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg><span class="tip">Sesiones</span></button>
+    <button id="navSpace"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3H4zm0 5h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm5 3v2h6v-2z"/></svg><span class="tip">Espacio y limpieza</span></button>
     <button id="navFav"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8l2.8 5.8 6.4.9-4.6 4.5 1.1 6.3L12 17.3l-5.7 3 1.1-6.3L2.8 9.5l6.4-.9z"/></svg><span class="tip">Favoritos</span></button>
   </nav>
   <div class="main" id="main"></div>
@@ -202,6 +216,8 @@ function render() {
   main.innerHTML = "";
   $("#navAll").classList.toggle("on", st.view === "all");
   $("#navFav").classList.toggle("on", st.view === "fav");
+  $("#navSpace").classList.toggle("on", st.view === "space");
+  if (st.view === "space") return renderSpace(main);
 
   if (!sessions.length) {
     main.append(h("div", { class: "empty" }, h("div", {},
@@ -237,6 +253,7 @@ function render() {
     h("h2", { id: "title" }), h("span", { class: "meta", id: "meta" }),
     h("div", { class: "grow" }),
     s.match ? h("button", { class: "chip", id: "fullBtn", onclick: () => playMatch(0) }, "▶ Partida completa") : null,
+    API ? h("button", { class: "chip danger", onclick: deleteSession, title: "Borrar esta partida y sus clips (los favoritos se conservan)" }, "🗑 Borrar partida") : null,
     API ? h("button", { class: "chip", onclick: reveal, title: "Abrir el Explorador con el vídeo seleccionado" }, "Mostrar en carpeta")
         : h("button", { class: "chip", onclick: copyPath, title: "Copiar la ruta del vídeo" }, "Copiar ruta")));
 
@@ -304,7 +321,8 @@ function clipCard(c, s, showGame) {
   return h("button", { class: "clip", "data-file": c.file, onclick: () => showGame ? openFav(s, c) : playClip(c) },
     h("div", { class: "thumb" }, h("video", { preload: "metadata", muted: "", src: src(c.file) + "#t=" + Math.min(2, (c.dur || 4) / 2) }), h("span", { class: "d" }, fmt(c.dur))),
     h("div", {},
-      h("div", { class: "n" }, h("span", { style: `color:${COLORS[cat]}` }, icon), name, star),
+      h("div", { class: "n" }, h("span", { style: `color:${COLORS[cat]}` }, icon), name, star,
+        API ? h("span", { class: "trash", title: "Borrar este clip", onclick: e => { e.stopPropagation(); deleteClip(c); } }, "🗑") : null),
       h("div", { class: "g" }, showGame ? `${s.game} · ${fdate(s.date)}` : (s.match ? `en ${fmt(c.t)}` : fdate(s.date)))));
 }
 
@@ -325,10 +343,106 @@ function openFav(s, c) { st.view = "all"; st.game = ""; select(s); playClip(c); 
 function toggleFav(file, el) {
   favs.has(file) ? favs.delete(file) : favs.add(file);
   saveFavs();
+  if (API) api("fav", { file, on: favs.has(file) ? 1 : 0 }).catch(() => {});
   document.querySelectorAll(".clip").forEach(b => {
     if (b.dataset.file === file) { const x = b.querySelector(".star"); x.classList.toggle("on", favs.has(file)); x.textContent = favs.has(file) ? "★" : "☆"; }
   });
   if (st.view === "fav") render();
+}
+
+// ------------------------------------------------------------- borrar y espacio
+const sizeOf = s => (s.match_size || 0) + s.clips.reduce((a, c) => a + (c.size || 0), 0);
+const human = b => b >= 1e9 ? (b / 1e9).toFixed(1).replace(".", ",") + " GB" : Math.round(b / 1e6) + " MB";
+const ageDays = s => {
+  const m = /^(\d+)-(\d+)-(\d+)/.exec(s.date || "");
+  if (!m) return 0;
+  const d = Date.UTC(+m[1], m[2] - 1, +m[3]);
+  const n = new Date();
+  return Math.round((Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) - d) / 864e5);
+};
+/** Lo que se borraría de una sesión (todo salvo clips favoritos). */
+const deletable = s => (s.match ? s.match_size || 0 : 0) + s.clips.filter(c => !favs.has(c.file)).reduce((a, c) => a + (c.size || 0), 0);
+
+function stopVideo() { if (video) { video.pause(); video.removeAttribute("src"); video.load(); } }
+function reloadTo(hash) { setTimeout(() => { location.hash = hash; location.reload(); }, 900); }
+
+async function deleteClip(c) {
+  const [name] = ev(c.label);
+  if (!confirm(`¿Borrar el clip "${name}"?\n\nIrá a la Papelera de reciclaje de Windows.`)) return;
+  if (st.playing === c) stopVideo();
+  try {
+    const r = await api("delete", { file: c.file });
+    if (r.error) throw new Error(r.error);
+    toast("Clip enviado a la Papelera");
+    reloadTo("#s=" + encodeURIComponent(st.sel.id));
+  } catch (e) { toast("No se pudo borrar"); }
+}
+
+async function deleteSession() {
+  const s = st.sel;
+  const favCount = s.clips.filter(c => favs.has(c.file)).length;
+  const what = [s.match ? "la partida completa" : null, `${s.clips.length - favCount} clip${s.clips.length - favCount === 1 ? "" : "s"}`].filter(Boolean).join(" y ");
+  const keep = favCount ? `\nSe conservarán ${favCount} clip${favCount === 1 ? "" : "s"} favorito${favCount === 1 ? "" : "s"}.` : "";
+  if (!confirm(`¿Borrar ${what} de esta partida (${human(deletable(s))})?${keep}\n\nIrá a la Papelera de reciclaje de Windows.`)) return;
+  stopVideo();
+  try {
+    const r = await api("delete_session", { id: s.id });
+    if (r.error) throw new Error(r.error);
+    toast("Borrado: " + r.text);
+    reloadTo("");
+  } catch (e) { toast("No se pudo borrar"); }
+}
+
+function renderSpace(main) {
+  main.append(h("header", {}, h("div", { class: "crumbs" }, h("span", {}, "Espacio y limpieza"))));
+  const total = sessions.reduce((a, s) => a + sizeOf(s), 0);
+  const favBytes = sessions.reduce((a, s) => a + s.clips.filter(c => favs.has(c.file)).reduce((x, c) => x + (c.size || 0), 0), 0);
+  const byGame = {};
+  for (const s of sessions) byGame[s.game] = (byGame[s.game] || 0) + sizeOf(s);
+  const box = h("div", { class: "space" });
+
+  box.append(h("div", { class: "panel" },
+    h("h3", {}, "Ocupado por tus vídeos"),
+    h("div", { class: "big" }, human(total)),
+    h("p", {}, `${sessions.length} partida${sessions.length === 1 ? "" : "s"} · ${sessions.reduce((a, s) => a + s.clips.length, 0)} clips · favoritos: ${human(favBytes)}`),
+    Object.entries(byGame).sort((a, b) => b[1] - a[1]).map(([g, b]) =>
+      h("div", {}, h("div", { class: "row" }, h("span", {}, g), h("span", {}, human(b))),
+        h("div", { class: "bar" }, h("i", { style: `width:${total ? b / total * 100 : 0}%` }))))));
+
+  const sel = h("select", {}, [7, 14, 30, 60, 90].map(d => h("option", { value: d, selected: d === 30 ? "" : false }, `más de ${d} días`)));
+  const preview = h("p", {});
+  const update = () => {
+    const d = +sel.value, old = sessions.filter(s => ageDays(s) > d && deletable(s) > 0);
+    preview.textContent = old.length
+      ? `Se borrarían ${old.length} partida${old.length === 1 ? "" : "s"} (${human(old.reduce((a, s) => a + deletable(s), 0))}). Los favoritos se conservan.`
+      : "No hay partidas tan antiguas.";
+  };
+  sel.onchange = update; update();
+  box.append(h("div", { class: "panel" },
+    h("h3", {}, "Borrar partidas viejas"),
+    h("div", { style: "display:flex;gap:8px;align-items:center" }, "Partidas de", sel),
+    preview,
+    API ? h("button", { class: "chip danger", onclick: async () => {
+      const d = +sel.value;
+      if (!sessions.some(s => ageDays(s) > d && deletable(s) > 0)) return toast("No hay nada que borrar");
+      if (!confirm(`¿Borrar los vídeos de las partidas de más de ${d} días?\n\nLos favoritos se conservan. Todo irá a la Papelera de reciclaje.`)) return;
+      stopVideo();
+      try {
+        const r = await api("cleanup", { days: d });
+        if (r.error) throw new Error(r.error);
+        toast("Borrado: " + r.text);
+        reloadTo("#v=espacio");
+      } catch (e) { toast("No se pudo borrar"); }
+    } }, "🗑 Borrar ahora") : h("p", {}, "Abre el reproductor desde ClipLite para poder borrar."),
+    h("p", {}, "Para que se haga solo: clic derecho en el icono de ClipLite › “Borrar vídeos viejos automáticamente”. La limpieza automática borra definitivamente; también puedes poner un límite de espacio (limite_espacio_gb) en la configuración.")));
+
+  const top = sessions.slice().sort((a, b) => sizeOf(b) - sizeOf(a)).slice(0, 8);
+  box.append(h("div", { class: "panel" },
+    h("h3", {}, "Las partidas que más ocupan"),
+    top.map(s => h("div", { class: "row" },
+      h("a", { href: "#", style: "color:var(--text)", onclick: e => { e.preventDefault(); st.view = "all"; select(s); } }, `${s.game} · ${fdate(s.date)}`),
+      h("span", {}, human(sizeOf(s)))))));
+  main.append(box);
 }
 
 // ------------------------------------------------------------- reproducción
@@ -578,9 +692,19 @@ document.addEventListener("keydown", e => {
 });
 
 $("#navAll").onclick = () => { st.view = "all"; if (!st.sel) pickFirst(); render(); };
+$("#navSpace").onclick = () => { st.view = "space"; if (video) video.pause(); render(); };
 $("#navFav").onclick = () => { st.view = "fav"; if (video) video.pause(); render(); };
 
-// sesión pedida en la URL (#s=...) o la más reciente
+// Favoritos: la biblioteca es la fuente (así la limpieza automática los respeta). Los marcados
+// antes solo en este navegador se envían una vez a ClipLite.
+for (const s of sessions) for (const c of s.clips) if (c.fav) favs.add(c.file);
+if (API) {
+  for (const s of sessions) for (const c of s.clips) if (favs.has(c.file) && !c.fav) api("fav", { file: c.file, on: 1 }).catch(() => {});
+}
+saveFavs();
+
+// sesión pedida en la URL (#s=...) o la más reciente; vista (#v=espacio)
+if (/v=espacio/.test(location.hash)) st.view = "space";
 const want = decodeURIComponent((location.hash.match(/s=([^&]+)/) || [])[1] || "");
 st.sel = sessions.find(s => s.id === want) || sessions[0] || null;
 render();

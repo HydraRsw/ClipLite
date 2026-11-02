@@ -43,6 +43,34 @@ pub fn civil_from_unix(secs: i64) -> (u32, u32, u32, u32, u32, u32) {
     )
 }
 
+/// Días desde 1970-01-01 de una fecha civil (algoritmo de Howard Hinnant).
+pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Días transcurridos desde una fecha "AAAA-MM-DD_hh-mm-ss" hasta hoy (hora local).
+pub fn age_days(date: &str) -> Option<i64> {
+    let mut it = date.split(|c| c == '-' || c == '_').map(|x| x.parse::<i64>());
+    let (y, m, d) = (it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
+    let (ny, nm, nd, ..) = crate::platform::local_time();
+    Some(days_from_civil(ny as i64, nm as i64, nd as i64) - days_from_civil(y, m, d))
+}
+
+/// Tamaño legible: 1,4 GB / 830 MB.
+pub fn human_size(b: u64) -> String {
+    let gb = b as f64 / 1e9;
+    if gb >= 1.0 {
+        format!("{:.1} GB", gb).replace('.', ",")
+    } else {
+        format!("{:.0} MB", b as f64 / 1e6)
+    }
+}
+
 /// Nombre legible del juego a partir del ejecutable.
 pub fn friendly_game(exe: &str) -> String {
     let base = exe.trim_end_matches(".exe").trim_end_matches(".EXE");
@@ -239,5 +267,10 @@ mod tests {
         assert_eq!(friendly_game("MiJuego-Win64-Shipping.exe"), "MiJuego");
         assert_eq!(sanitize("a:b/c?"), "a_b_c_");
         assert_eq!(civil_from_unix(1_793_542_385), (2026, 11, 1, 14, 13, 5));
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2026, 11, 1), 1_793_542_385 / 86_400);
+        assert_eq!(days_from_civil(2024, 3, 1) - days_from_civil(2024, 2, 28), 2);
+        assert_eq!(human_size(1_400_000_000), "1,4 GB");
+        assert_eq!(human_size(830_000_000), "830 MB");
     }
 }

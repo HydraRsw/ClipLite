@@ -167,7 +167,46 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
             return respond(&mut stream, "403 Forbidden", "text/plain", b"");
         }
         let rel = query(q, "file").unwrap_or_default();
+        let freed_json = |f: crate::library::Freed| {
+            Json::Obj(vec![
+                ("files".into(), Json::Num(f.files as f64)),
+                ("bytes".into(), Json::Num(f.bytes as f64)),
+                ("text".into(), Json::str(&f.describe())),
+            ])
+        };
+        // Acciones que no necesitan un archivo existente.
+        match api {
+            "delete_session" => {
+                let id = query(q, "id").unwrap_or_default();
+                let f = crate::library::delete_session(&root, &id, true);
+                return json(&mut stream, freed_json(f));
+            }
+            "cleanup" => {
+                let days: u32 = query(q, "days").and_then(|d| d.parse().ok()).unwrap_or(0);
+                if days == 0 {
+                    return error(&mut stream, "Indica los días");
+                }
+                let f = crate::library::cleanup(&root, days, 0.0, true);
+                return json(&mut stream, freed_json(f));
+            }
+            "fav" => {
+                // Validar que la ruta sea relativa y sin "..".
+                if rel.is_empty() || rel.split(['/', '\\']).any(|c| c == "..") {
+                    return error(&mut stream, "Ruta inválida");
+                }
+                let on = query(q, "on").as_deref() == Some("1");
+                return match crate::library::set_fav(&root, &rel, on) {
+                    Ok(()) => json(&mut stream, Json::Obj(vec![("ok".into(), Json::Bool(true))])),
+                    Err(e) => error(&mut stream, &e.to_string()),
+                };
+            }
+            _ => {}
+        }
         let Some(src) = safe_path(&root, &rel) else { return error(&mut stream, "Archivo no encontrado") };
+        if api == "delete" {
+            let f = crate::library::delete_file(&root, &rel, true);
+            return json(&mut stream, freed_json(f));
+        }
         let keep: Vec<usize> = query(q, "keep")
             .unwrap_or_default()
             .split(',')

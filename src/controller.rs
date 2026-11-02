@@ -19,13 +19,14 @@ pub enum Cmd {
     SetFolder(PathBuf),
     Reload,
     OpenLibrary,
+    SetCleanDays(u32),
     Notice(String),
     Quit,
 }
 
 #[derive(Clone)]
 pub enum UiMsg {
-    State { recording: bool, game: String, mode: Mode, folder: PathBuf, encoder: String },
+    State { recording: bool, game: String, mode: Mode, folder: PathBuf, encoder: String, clean_days: u32 },
     Notice(String),
     Exit,
 }
@@ -92,6 +93,7 @@ impl Controller {
             Some(e) => log!("Codificador elegido: {}", e.label),
             None => self.notice("No se encontró ningún codificador que funcione. Revisa el registro (log.txt)."),
         }
+        self.cleanup();
         crate::events::spawn_cs2(self.cfg.cs2_port, self.cfg.cs2_events.clone(), self.tx.clone());
         self.push_state();
 
@@ -191,6 +193,16 @@ impl Controller {
             Cmd::OpenLibrary => {
                 crate::platform::open_url(&crate::library::player_url(&self.cfg.output_dir, None));
             }
+            Cmd::SetCleanDays(d) => {
+                self.cfg.clean_days = d;
+                self.save_cfg();
+                self.notice(&if d == 0 {
+                    "Los vídeos viejos ya no se borrarán solos".to_string()
+                } else {
+                    format!("Se borrarán solos los vídeos de más de {d} días (excepto favoritos)")
+                });
+                self.cleanup();
+            }
             Cmd::Notice(msg) => self.notice(&msg),
             Cmd::Quit => {}
         }
@@ -256,10 +268,21 @@ impl Controller {
         }
     }
 
+    fn cleanup(&self) {
+        if self.cfg.clean_days > 0 || self.cfg.limit_gb > 0.0 {
+            let _ = self.jobs.send(Job::Cleanup {
+                out_root: self.cfg.output_dir.clone(),
+                days: self.cfg.clean_days,
+                limit_gb: self.cfg.limit_gb,
+            });
+        }
+    }
+
     fn stop_session(&mut self, open_player: bool) {
         self.stop_lol();
         if let Some((s, _)) = self.session.take() {
             s.stop(&self.jobs, open_player);
+            self.cleanup();
             self.beep();
         }
     }
@@ -290,6 +313,7 @@ impl Controller {
             mode: self.cfg.mode,
             folder: self.cfg.output_dir.clone(),
             encoder: self.encoder.as_ref().map(|e| e.label.clone()).unwrap_or_else(|| "ninguno".into()),
+            clean_days: self.cfg.clean_days,
         });
     }
 }

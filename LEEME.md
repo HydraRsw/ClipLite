@@ -82,6 +82,8 @@ Kills seguidas se unen en un único clip con la etiqueta del mejor momento (por 
 | `pistas_por_aplicacion` | si | guardar juego y aplicaciones en pistas separadas |
 | `apps_con_pista_propia` | Discord.exe, Spotify.exe | añade el `.exe` de cualquier app (p. ej. `chrome.exe`) |
 | `microfono` | no | grabar tu micrófono en su propia pista |
+| `borrar_videos_de_mas_de_dias` | 0 | borrar solos los vídeos de partidas con más días (0 = nunca) |
+| `limite_espacio_gb` | 0 | tope de espacio; se borra lo más antiguo (0 = sin límite) |
 | `atajo_clip` / `atajo_grabar` | Ctrl+F10 / Ctrl+F9 | |
 | `juegos` | lista | añade el `.exe` de cualquier juego para que lo detecte |
 | `eventos_lol` | kills, multikills, objetivos | añade `muertes`, `asistencias` si quieres |
@@ -105,6 +107,17 @@ En el reproductor aparecen como casillas debajo del vídeo: desmarca **Discord**
 - Al quitar pistas se oyen solo las pistas marcadas: los sonidos de aplicaciones sin pista propia (por ejemplo, un vídeo de YouTube) solo están en "Todo".
 - Editores como DaVinci Resolve o Premiere muestran cada pista con su nombre.
 - Necesita Windows 11 o Windows 10 versión 2004 o posterior. En versiones anteriores se graba solo la pista "Todo", como siempre.
+
+## Borrar vídeos viejos
+
+- **Automático:** clic derecho en el icono › **Borrar vídeos viejos automáticamente** › Nunca / 7 / 14 / 30 / 90 días. Se revisa al abrir ClipLite y después de cada partida. También puedes poner un tope de espacio con `limite_espacio_gb` en la configuración: si los vídeos lo superan, se borran empezando por los más antiguos.
+- **A mano, desde el reproductor:**
+  - 🗑 en cada clip, o **Borrar partida** arriba.
+  - En **Espacio y limpieza** (barra lateral) ves cuánto ocupa todo y puedes borrar de golpe las partidas de más de X días.
+- **Seguridad:**
+  - Los clips marcados como **favoritos (☆) nunca se borran** automáticamente ni al borrar una partida entera.
+  - Lo que borras a mano va a la **Papelera de reciclaje**; la limpieza automática borra definitivamente, porque si no, no liberaría espacio.
+  - Solo se tocan vídeos creados por ClipLite.
 
 ## Reproductor
 

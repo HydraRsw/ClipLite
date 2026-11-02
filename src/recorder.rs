@@ -139,6 +139,8 @@ pub enum Job {
     RemoveDir(PathBuf),
     /// Añade la sesión a la biblioteca y (opcionalmente) abre el reproductor.
     Library { out_root: PathBuf, entry: LibEntry, open: bool },
+    /// Borra los vídeos viejos según la configuración.
+    Cleanup { out_root: PathBuf, days: u32, limit_gb: f64 },
 }
 
 /// Hilo que une segmentos y limpia carpetas, para no bloquear nunca al controlador.
@@ -183,6 +185,12 @@ pub fn spawn_worker(ffmpeg: PathBuf, rx: Receiver<Job>, notify: Sender<Cmd>) -> 
                                 }
                             }
                             Err(e) => log!("No se pudo actualizar la biblioteca: {e}"),
+                        }
+                    }
+                    Job::Cleanup { out_root, days, limit_gb } => {
+                        let freed = crate::library::cleanup(&out_root, days, limit_gb, false);
+                        if freed.files > 0 {
+                            let _ = notify.send(Cmd::Notice(format!("Limpieza: se borraron {}", freed.describe())));
                         }
                     }
                 }

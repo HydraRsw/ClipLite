@@ -125,8 +125,21 @@ extern "system" {
     fn RegisterWindowMessageW(s: *const u16) -> u32;
     fn MessageBeep(t: u32) -> BOOL;
 }
+#[repr(C)]
+struct SHFILEOPSTRUCTW {
+    hwnd: H,
+    func: u32,
+    from: *const u16,
+    to: *const u16,
+    flags: u16,
+    aborted: BOOL,
+    name_mappings: *mut c_void,
+    progress_title: *const u16,
+}
+
 #[link(name = "shell32")]
 extern "system" {
+    fn SHFileOperationW(op: *mut SHFILEOPSTRUCTW) -> i32;
     fn Shell_NotifyIconW(msg: u32, data: *mut NOTIFYICONDATAW) -> BOOL;
     fn ShellExecuteW(h: H, op: *const u16, file: *const u16, params: *const u16, dir: *const u16, show: i32) -> H;
 }
@@ -208,6 +221,8 @@ const ID_RELOAD: usize = 33;
 const ID_LOG: usize = 34;
 const ID_LIBRARY: usize = 35;
 const ID_AUTOSTART: usize = 40;
+const ID_CLEAN: usize = 50; // 50..=54
+const CLEAN_OPTIONS: [(u32, &str); 5] = [(0, "Nunca"), (7, "Más de 7 días"), (14, "Más de 14 días"), (30, "Más de 30 días"), (90, "Más de 90 días")];
 const ID_QUIT: usize = 99;
 
 fn w(s: &str) -> Vec<u16> {
@@ -326,6 +341,30 @@ pub fn open_url(url: &str) {
         if r <= 32 {
             ShellExecuteW(0, w("open").as_ptr(), w(url).as_ptr(), null(), null(), 1);
         }
+    }
+}
+
+/// Envía un archivo a la Papelera de reciclaje (se puede recuperar).
+pub fn trash(p: &Path) -> Result<(), String> {
+    // SHFileOperation no admite el prefijo \\?\ y exige la lista terminada en doble nulo.
+    let path = p.to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    let mut from: Vec<u16> = path.encode_utf16().collect();
+    from.extend([0, 0]);
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd: 0,
+        func: 3, // FO_DELETE
+        from: from.as_ptr(),
+        to: null(),
+        flags: 0x40 | 0x10 | 0x4 | 0x400, // ALLOWUNDO | NOCONFIRMATION | SILENT | NOERRORUI
+        aborted: 0,
+        name_mappings: null_mut(),
+        progress_title: null(),
+    };
+    let r = unsafe { SHFileOperationW(&mut op) };
+    if r == 0 && op.aborted == 0 {
+        Ok(())
+    } else {
+        Err(format!("SHFileOperation 0x{r:X}"))
     }
 }
 
@@ -895,6 +934,7 @@ struct View {
     encoder: String,
     hk_clip: String,
     hk_rec: String,
+    clean_days: u32,
 }
 
 struct Ctx {
@@ -998,6 +1038,13 @@ unsafe fn show_menu(hwnd: H) {
     add(0, ID_EDIT, "Editar configuración");
     add(0, ID_RELOAD, "Recargar configuración");
     add(0, ID_LOG, "Ver registro");
+    let sub = CreatePopupMenu();
+    for (i, (d, label)) in CLEAN_OPTIONS.iter().enumerate() {
+        AppendMenuW(sub, check(v.clean_days == *d), ID_CLEAN + i, w(label).as_ptr());
+    }
+    AppendMenuW(sub, MF_SEPARATOR, 0, w("").as_ptr());
+    AppendMenuW(sub, MF_GRAYED, 3, w("Los favoritos nunca se borran").as_ptr());
+    add(0x10 /* MF_POPUP */, sub as usize, "Borrar vídeos viejos automáticamente");
     add(check(autostart_enabled()), ID_AUTOSTART, "Iniciar con Windows");
     add(MF_SEPARATOR, 0, "");
     add(0, ID_QUIT, "Salir");
@@ -1046,6 +1093,7 @@ unsafe fn show_menu(hwnd: H) {
             send(Cmd::Reload);
         }
         ID_AUTOSTART => set_autostart(!autostart_enabled()),
+        x if (ID_CLEAN..ID_CLEAN + CLEAN_OPTIONS.len()).contains(&x) => send(Cmd::SetCleanDays(CLEAN_OPTIONS[x - ID_CLEAN].0)),
         ID_QUIT => send(Cmd::Quit),
         _ => {}
     }
@@ -1076,7 +1124,7 @@ unsafe extern "system" fn wndproc(hwnd: H, msg: u32, wparam: usize, lparam: isiz
             let msgs: Vec<UiMsg> = c.queue.lock().unwrap().drain(..).collect();
             for m in msgs {
                 match m {
-                    UiMsg::State { recording, game, mode, folder, encoder } => {
+                    UiMsg::State { recording, game, mode, folder, encoder, clean_days } => {
                         {
                             let mut v = c.view.lock().unwrap();
                             v.recording = recording;
@@ -1084,6 +1132,7 @@ unsafe extern "system" fn wndproc(hwnd: H, msg: u32, wparam: usize, lparam: isiz
                             v.mode = mode;
                             v.folder = folder;
                             v.encoder = encoder;
+                            v.clean_days = clean_days;
                         }
                         tray(NIM_MODIFY, None);
                     }
@@ -1216,6 +1265,7 @@ pub fn run() {
                 encoder: "comprobando…".into(),
                 hk_clip: cfg.hotkey_clip.clone(),
                 hk_rec: cfg.hotkey_record.clone(),
+                clean_days: cfg.clean_days,
             }),
             hwnd: AtomicIsize::new(0),
             taskbar_msg: RegisterWindowMessageW(w("TaskbarCreated").as_ptr()),

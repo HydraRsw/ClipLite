@@ -26,7 +26,7 @@ pub fn probe_input(cfg: &Config) -> Vec<String> {
     vec!["-f".into(), "lavfi".into(), "-i".into(), format!("ddagrab=output_idx={}:framerate=10", cfg.monitor)]
 }
 #[cfg(windows)]
-pub use crate::win::{boost_audio_thread, config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
+pub use crate::win::{boost_audio_thread, trash, config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
 
 // ---------------------------------------------------------------- Pruebas (Linux/macOS)
 #[cfg(not(windows))]
@@ -76,6 +76,10 @@ pub fn boost_ffmpeg(child: &std::process::Child) {
 }
 #[cfg(not(windows))]
 pub fn boost_audio_thread() {}
+#[cfg(not(windows))]
+pub fn trash(p: &Path) -> Result<(), String> {
+    std::fs::remove_file(p).map_err(|e| e.to_string())
+}
 #[cfg(not(windows))]
 pub fn open_url(url: &str) {
     log!("Abrir reproductor: {url}");

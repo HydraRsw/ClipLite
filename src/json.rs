@@ -98,6 +98,24 @@ impl Json {
             }
         }
     }
+    /// Cambia (o añade) un campo de un objeto.
+    pub fn set(&mut self, key: &str, v: Json) {
+        if let Json::Obj(fields) = self {
+            match fields.iter_mut().find(|(k, _)| k == key) {
+                Some(f) => f.1 = v,
+                None => fields.push((key.to_string(), v)),
+            }
+        }
+    }
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Json> {
+        match self {
+            Json::Obj(v) => v.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+    pub fn as_bool(&self) -> bool {
+        matches!(self, Json::Bool(true))
+    }
     pub fn to_text(&self) -> String {
         let mut s = String::new();
         self.dump(&mut s);

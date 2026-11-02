@@ -47,6 +47,8 @@ pub struct Config {
     pub app_tracks: bool,
     pub track_apps: Vec<String>,
     pub mic: bool,
+    pub clean_days: u32,
+    pub limit_gb: f64,
     pub ffmpeg: String,
 }
 
@@ -98,6 +100,8 @@ impl Default for Config {
             app_tracks: true,
             track_apps: ["Discord.exe", "Spotify.exe"].iter().map(|s| s.to_string()).collect(),
             mic: false,
+            clean_days: 0,
+            limit_gb: 0.0,
             ffmpeg: String::new(),
         }
     }
@@ -172,6 +176,8 @@ impl Config {
                 "pistas_por_aplicacion" => self.app_tracks = parse_bool(v).unwrap_or(self.app_tracks),
                 "apps_con_pista_propia" => self.track_apps = parse_list(v),
                 "microfono" | "micrófono" => self.mic = parse_bool(v).unwrap_or(self.mic),
+                "borrar_videos_de_mas_de_dias" => self.clean_days = v.parse().unwrap_or(self.clean_days),
+                "limite_espacio_gb" => self.limit_gb = v.replace(',', ".").parse().unwrap_or(self.limit_gb),
                 "abrir_reproductor" => self.open_player = parse_bool(v).unwrap_or(self.open_player),
                 "ffmpeg" => self.ffmpeg = v.to_string(),
                 _ => {}
@@ -247,6 +253,13 @@ puerto_cs2 = {port}
 # Abrir el reproductor con la partida y sus clips al cerrar el juego
 abrir_reproductor = {player}
 
+# ---------------- Limpieza ----------------
+# Borrar automáticamente los vídeos de partidas con más de estos días (0 = nunca).
+# Los clips marcados como favoritos (☆ en el reproductor) nunca se borran.
+borrar_videos_de_mas_de_dias = {clean}
+# Si los vídeos ocupan más de estos GB, borrar empezando por los más antiguos (0 = sin límite)
+limite_espacio_gb = {limit}
+
 # ---------------- Otros ----------------
 sonido = {sonido}
 notificaciones = {notif}
@@ -280,6 +293,8 @@ ffmpeg = {ffmpeg}
             apptracks = b(self.app_tracks),
             trackapps = self.track_apps.join(", "),
             mic = b(self.mic),
+            clean = self.clean_days,
+            limit = self.limit_gb,
             ffmpeg = self.ffmpeg,
         );
         std::fs::write(path, text)
