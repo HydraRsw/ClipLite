@@ -78,6 +78,8 @@ impl OutInfo {
     }
 }
 
+static STALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub type Clock = Arc<std::sync::Mutex<Option<Instant>>>;
 
 pub struct AudioThread {
@@ -203,14 +205,71 @@ impl Sec {
     }
 }
 
-/// Escribe `master` (N fotogramas de la pista principal) intercalando N fotogramas de cada pista extra.
-fn emit(stdin: &mut ChildStdin, master: &[u8], bpf: usize, secs: &mut [Sec], written: &mut u64) -> bool {
+/// Entrega el audio a FFmpeg desde un hilo propio. Así la captura NUNCA espera a FFmpeg:
+/// si FFmpeg deja de leer un rato (pasa al cargar una partida), el audio se guarda en memoria
+/// y se entrega después, sin perder nada y con sus tiempos intactos.
+struct Writer {
+    tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
+    queued: Arc<std::sync::atomic::AtomicU64>,
+    dead: Arc<AtomicBool>,
+    max_queued: u64,
+}
+
+/// Límite de seguridad de la cola (si FFmpeg se quedara colgado de verdad).
+const WRITER_LIMIT: u64 = 512 * 1024 * 1024;
+
+impl Writer {
+    fn new(mut stdin: ChildStdin) -> Writer {
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let queued = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let dead = Arc::new(AtomicBool::new(false));
+        let (q2, d2) = (queued.clone(), dead.clone());
+        let spawned = std::thread::Builder::new().name("audio-ffmpeg".into()).spawn(move || {
+            while let Ok(buf) = rx.recv() {
+                // Solo pruebas: simula que FFmpeg deja de leer un rato.
+                let n = STALL.swap(u64::MAX, Ordering::SeqCst);
+                if n > 0 && n != u64::MAX {
+                    std::thread::sleep(Duration::from_secs(n));
+                } else if n == 0 {
+                    STALL.store(0, Ordering::SeqCst);
+                }
+                if stdin.write_all(&buf).is_err() {
+                    d2.store(true, Ordering::SeqCst);
+                    break;
+                }
+                q2.fetch_sub(buf.len() as u64, Ordering::SeqCst);
+            }
+            let _ = stdin.flush();
+            // Al soltar `stdin`, FFmpeg ve el fin del audio y termina (-shortest).
+        });
+        if spawned.is_err() {
+            dead.store(true, Ordering::SeqCst);
+        }
+        Writer { tx: Some(tx), queued, dead, max_queued: 0 }
+    }
+
+    fn send(&mut self, data: Vec<u8>) -> bool {
+        if self.dead.load(Ordering::SeqCst) {
+            return false;
+        }
+        let q = self.queued.fetch_add(data.len() as u64, Ordering::SeqCst) + data.len() as u64;
+        self.max_queued = self.max_queued.max(q);
+        if q > WRITER_LIMIT {
+            log!("Audio: FFmpeg lleva demasiado tiempo sin leer el audio; se reinicia la captura");
+            return false;
+        }
+        self.tx.as_ref().map_or(false, |tx| tx.send(data).is_ok())
+    }
+}
+
+/// Envía `master` (N fotogramas de la pista principal) intercalando N fotogramas de cada pista extra.
+fn emit(w: &mut Writer, master: &[u8], bpf: usize, secs: &mut [Sec], written: &mut u64) -> bool {
     if master.is_empty() {
         return true;
     }
     *written += master.len() as u64;
     if secs.is_empty() {
-        return stdin.write_all(master).is_ok();
+        return w.send(master.to_vec());
     }
     let frames = master.len() / bpf;
     let mut out = Vec::with_capacity(frames * (bpf + MULTI_BPF * secs.len()));
@@ -225,10 +284,19 @@ fn emit(stdin: &mut ChildStdin, master: &[u8], bpf: usize, secs: &mut [Sec], wri
             }
         }
     }
-    stdin.write_all(&out).is_ok()
+    w.send(out)
 }
 
-fn pump(mut master: Box<dyn Capture>, mut secs: Vec<Sec>, mut stdin: ChildStdin, stop: &AtomicBool, clock: Clock) {
+fn pump(mut master: Box<dyn Capture>, mut secs: Vec<Sec>, stdin: ChildStdin, stop: &AtomicBool, clock: Clock) {
+    // Este hilo apenas usa CPU, pero no debe quedarse sin turno aunque el juego use el 100 %.
+    crate::platform::boost_audio_thread();
+    let mut writer = Writer::new(stdin);
+    // Solo pruebas: CLIPLITE_STALL="a,n" simula que FFmpeg deja de leer el audio n segundos
+    // a partir del segundo a de grabación.
+    let stall: Option<(u64, u64)> = std::env::var("CLIPLITE_STALL").ok().and_then(|v| {
+        let (a, n) = v.split_once(',')?;
+        Some((a.parse().ok()?, n.parse().ok()?))
+    });
     let fmt = master.format();
     let bpf = fmt.bytes_per_frame().max(1);
     let bpf64 = bpf as u64;
@@ -302,7 +370,7 @@ fn pump(mut master: Box<dyn Capture>, mut secs: Vec<Sec>, mut stdin: ChildStdin,
                 let mut left = expected - written;
                 while left > 0 {
                     let n = left.min(zeros.len() as u64) as usize;
-                    if !emit(&mut stdin, &zeros[..n], bpf, &mut secs, &mut written) {
+                    if !emit(&mut writer, &zeros[..n], bpf, &mut secs, &mut written) {
                         break 'main;
                     }
                     left -= n as u64;
@@ -339,7 +407,7 @@ fn pump(mut master: Box<dyn Capture>, mut secs: Vec<Sec>, mut stdin: ChildStdin,
                     }
                 }
             }
-            if !emit(&mut stdin, &data, bpf, &mut secs, &mut written) {
+            if !emit(&mut writer, &data, bpf, &mut secs, &mut written) {
                 break 'main;
             }
             buf = data;
@@ -356,7 +424,7 @@ fn pump(mut master: Box<dyn Capture>, mut secs: Vec<Sec>, mut stdin: ChildStdin,
                 let mut left = lag;
                 while left > 0 {
                     let n = left.min(zeros.len() as u64) as usize;
-                    if !emit(&mut stdin, &zeros[..n], bpf, &mut secs, &mut written) {
+                    if !emit(&mut writer, &zeros[..n], bpf, &mut secs, &mut written) {
                         break 'main;
                     }
                     left -= n as u64;
@@ -364,13 +432,20 @@ fn pump(mut master: Box<dyn Capture>, mut secs: Vec<Sec>, mut stdin: ChildStdin,
                 err_avg = 0.0;
             }
         }
+        if let Some((a, n)) = stall {
+            if start.elapsed() >= Duration::from_secs(a) && STALL.load(Ordering::SeqCst) == 0 {
+                STALL.store(n, Ordering::SeqCst);
+            }
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
-    let _ = stdin.flush();
+    let out_bps = fmt.rate as f64 * (bpf + MULTI_BPF * secs.len()) as f64;
     log!(
-        "Audio: fin. Desfase medio {:+.0} ms, {} microajustes de reloj, {} rellenos de silencio",
+        "Audio: fin. Desfase medio {:+.0} ms, {} microajustes de reloj, {} rellenos de silencio, máximo esperando a FFmpeg {:.1} s",
         ms_of(err_avg),
         nudges,
-        fills
+        fills,
+        writer.max_queued as f64 / out_bps
     );
+    drop(writer); // el hilo escritor termina de entregar lo pendiente y cierra la tubería
 }

@@ -348,6 +348,8 @@ struct Part {
     csv_off: u64,
     csv_partial: String,
     logged: bool,
+    /// Fotogramas codificados según FFmpeg (para saber si sigue avanzando al cerrar).
+    frames: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Part {
@@ -408,17 +410,21 @@ impl Part {
             .spawn()
             .map_err(|e| format!("No se pudo iniciar ffmpeg: {e}"))?;
         let spawned = Instant::now();
+        crate::platform::boost_ffmpeg(&child);
 
         // Reloj del vídeo: FFmpeg informa cuántos fotogramas ha codificado (a ritmo constante),
         // así que fotograma 0 = ahora - fotogramas/fps. Se queda el valor más temprano observado.
         let origin = Arc::new(Mutex::new(None::<Instant>));
+        let frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let fps = cfg.fps as f64;
         if let Some(out) = child.stdout.take() {
             let origin = origin.clone();
+            let frames = frames.clone();
             std::thread::spawn(move || {
                 for line in BufReader::new(out).lines().map_while(Result::ok) {
                     let Some(v) = line.strip_prefix("frame=") else { continue };
                     let Ok(n) = v.trim().parse::<u64>() else { continue };
+                    frames.store(n, Ordering::SeqCst);
                     let now = Instant::now();
                     let secs = n as f64 / fps;
                     if n == 0 || secs > now.duration_since(spawned).as_secs_f64() + 1.0 {
@@ -462,6 +468,7 @@ impl Part {
             csv_off: 0,
             csv_partial: String::new(),
             logged: false,
+            frames,
         };
         Ok((part, info))
     }
@@ -516,8 +523,32 @@ impl Part {
         } else if let Some(mut stdin) = self.child.stdin.take() {
             let _ = stdin.write_all(b"q");
         }
-        if util::wait_timeout(&mut self.child, Duration::from_secs(8)).is_none() {
-            log!("FFmpeg no respondió; se forzó el cierre");
+        // FFmpeg puede tener audio pendiente de procesar (si se retrasó durante la partida):
+        // se le espera mientras siga avanzando, hasta 90 s; si se queda parado 4 s, se cierra.
+        let start = Instant::now();
+        let mut last = self.frames.load(Ordering::SeqCst);
+        let mut last_change = Instant::now();
+        loop {
+            if matches!(self.child.try_wait(), Ok(Some(_)) | Err(_)) {
+                break;
+            }
+            let f = self.frames.load(Ordering::SeqCst);
+            if f != last {
+                last = f;
+                last_change = Instant::now();
+            }
+            let waited = start.elapsed();
+            if waited > Duration::from_secs(90) || (waited > Duration::from_secs(8) && last_change.elapsed() > Duration::from_secs(4)) {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                log!("FFmpeg no respondió; se forzó el cierre");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let waited = start.elapsed().as_secs_f64();
+        if waited > 3.0 {
+            log!("FFmpeg tardó {waited:.1} s en terminar de guardar");
         }
     }
 }

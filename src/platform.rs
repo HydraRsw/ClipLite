@@ -26,7 +26,7 @@ pub fn probe_input(cfg: &Config) -> Vec<String> {
     vec!["-f".into(), "lavfi".into(), "-i".into(), format!("ddagrab=output_idx={}:framerate=10", cfg.monitor)]
 }
 #[cfg(windows)]
-pub use crate::win::{config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
+pub use crate::win::{boost_audio_thread, config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
 
 // ---------------------------------------------------------------- Pruebas (Linux/macOS)
 #[cfg(not(windows))]
@@ -64,6 +64,18 @@ pub fn install_cs2_cfg(_port: u16) {}
 pub fn lol_fetcher() -> Option<Fetcher> {
     None
 }
+/// Da prioridad alta (CPU y GPU) al proceso de FFmpeg.
+pub fn boost_ffmpeg(child: &std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        crate::win::boost_process(child.as_raw_handle() as isize);
+    }
+    #[cfg(not(windows))]
+    let _ = child;
+}
+#[cfg(not(windows))]
+pub fn boost_audio_thread() {}
 #[cfg(not(windows))]
 pub fn open_url(url: &str) {
     log!("Abrir reproductor: {url}");
@@ -122,6 +134,10 @@ impl Capture for TestTone {
         let t = (self.start.elapsed().as_secs_f64() - latency as f64 / 1000.0).max(0.0);
         let produced = (t * 48_000.0 * (1.0 + self.drift)) as u64 / 480 * 480;
         let dev_t = produced as f64 / 48_000.0 / (1.0 + self.drift);
+        // Como WASAPI: el búfer guarda 1 s; si nadie lo lee a tiempo, lo más antiguo se pierde.
+        if produced > self.delivered + 48_000 {
+            self.delivered = produced - 48_000;
+        }
         if self.gap && (3.0..5.0).contains(&dev_t) {
             self.delivered = self.delivered.max(produced);
             return Ok(());

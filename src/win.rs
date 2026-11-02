@@ -149,6 +149,8 @@ extern "system" {
     fn CreateEventW(attr: *const c_void, manual: BOOL, initial: BOOL, name: *const u16) -> H;
     fn WaitForSingleObject(h: H, ms: u32) -> u32;
     fn SetEvent(h: H) -> BOOL;
+    fn SetThreadPriority(h: H, p: i32) -> BOOL;
+    fn GetCurrentThread() -> H;
 }
 #[link(name = "ole32")]
 extern "system" {
@@ -323,6 +325,32 @@ pub fn open_url(url: &str) {
         let r = ShellExecuteW(0, w("open").as_ptr(), w("msedge.exe").as_ptr(), args.as_ptr(), null(), 1);
         if r <= 32 {
             ShellExecuteW(0, w("open").as_ptr(), w(url).as_ptr(), null(), null(), 1);
+        }
+    }
+}
+
+/// El hilo de audio: prioridad máxima (solo copia datos cada 10 ms; no quita rendimiento al juego).
+pub fn boost_audio_thread() {
+    unsafe {
+        SetThreadPriority(GetCurrentThread(), 15 /* THREAD_PRIORITY_TIME_CRITICAL */);
+    }
+}
+
+/// FFmpeg: prioridad de CPU "por encima de lo normal" y prioridad de GPU alta, para que la
+/// captura no se quede sin turno cuando el juego usa la GPU al 100 % (lo mismo que hace OBS).
+pub fn boost_process(h: H) {
+    unsafe {
+        SetPriorityClass(h, 0x8000 /* ABOVE_NORMAL_PRIORITY_CLASS */);
+        let gdi = LoadLibraryW(w("gdi32.dll").as_ptr());
+        if gdi != 0 {
+            let f = GetProcAddress(gdi, b"D3DKMTSetProcessSchedulingPriorityClass\0".as_ptr());
+            if f != 0 {
+                let set: unsafe extern "system" fn(H, i32) -> i32 = transmute(f);
+                let r = set(h, 4 /* D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH */);
+                if r != 0 {
+                    log!("No se pudo subir la prioridad de GPU de FFmpeg (0x{:08X})", r as u32);
+                }
+            }
         }
     }
 }
