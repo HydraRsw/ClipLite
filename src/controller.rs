@@ -89,6 +89,9 @@ impl Controller {
         crate::server::start(self.cfg.output_dir.clone(), self.ffmpeg.clone());
         recorder::recover_leftovers(&self.cfg.output_dir.join(".buffer"), &self.cfg.output_dir, &self.jobs);
         self.encoder = recorder::probe_encoder(&self.ffmpeg, &self.cfg);
+        if let Some(e) = &self.encoder {
+            crate::editor::set_encoder(&e.label, self.cfg.bitrate_mbps);
+        }
         match &self.encoder {
             Some(e) => log!("Codificador elegido: {}", e.label),
             None => self.notice("No se encontró ningún codificador que funcione. Revisa el registro (log.txt)."),

@@ -129,6 +129,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
     let mut parts = line.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
     let (mut host, mut range) = (String::new(), None::<String>);
+    let mut content_len: usize = 0;
     let mut total = 0;
     loop {
         let mut h = String::new();
@@ -143,6 +144,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
             match k.trim().to_ascii_lowercase().as_str() {
                 "host" => host = v.trim().to_string(),
                 "range" => range = Some(v.trim().to_string()),
+                "content-length" => content_len = v.trim().parse().unwrap_or(0),
                 _ => {}
             }
         }
@@ -151,10 +153,17 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
     if !ok_hosts.contains(&host) {
         return respond(&mut stream, "403 Forbidden", "text/plain", b"");
     }
-    if method != "GET" && method != "HEAD" {
+    let (path, q) = target.split_once('?').unwrap_or((target, ""));
+    let mut body = Vec::new();
+    if method == "POST" && path == "/api/edit" {
+        if content_len > 1_000_000 {
+            return respond(&mut stream, "413 Payload Too Large", "text/plain", b"");
+        }
+        body.resize(content_len, 0);
+        reader.read_exact(&mut body)?;
+    } else if method != "GET" && method != "HEAD" {
         return respond(&mut stream, "405 Method Not Allowed", "text/plain", b"");
     }
-    let (path, q) = target.split_once('?').unwrap_or((target, ""));
     let root = srv.root.lock().unwrap().clone();
 
     if path == "/" {
@@ -176,6 +185,31 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
         };
         // Acciones que no necesitan un archivo existente.
         match api {
+            "edit" => return edit_start(&mut stream, srv, &root, &body),
+            "edit_status" => {
+                let id = query(q, "id").unwrap_or_default();
+                let j = match crate::editor::status(&id) {
+                    None => Json::Obj(vec![("state".into(), Json::str("unknown"))]),
+                    Some(crate::editor::State::Running(p)) => {
+                        Json::Obj(vec![("state".into(), Json::str("running")), ("progress".into(), Json::Num(p))])
+                    }
+                    Some(crate::editor::State::Done { path, name, bytes }) => Json::Obj(vec![
+                        ("state".into(), Json::str("done")),
+                        ("name".into(), Json::str(&name)),
+                        ("file".into(), Json::str(&rel_path(&root, &path))),
+                        ("size".into(), Json::str(&util::human_size(bytes))),
+                    ]),
+                    Some(crate::editor::State::Failed(e)) => {
+                        Json::Obj(vec![("state".into(), Json::str("failed")), ("error".into(), Json::str(&e))])
+                    }
+                    Some(crate::editor::State::Cancelled) => Json::Obj(vec![("state".into(), Json::str("cancelled"))]),
+                };
+                return json(&mut stream, j);
+            }
+            "edit_cancel" => {
+                crate::editor::cancel(&query(q, "id").unwrap_or_default());
+                return json(&mut stream, Json::Obj(vec![("ok".into(), Json::Bool(true))]));
+            }
             "delete_session" => {
                 let id = query(q, "id").unwrap_or_default();
                 let f = crate::library::delete_session(&root, &id, true);
@@ -257,6 +291,31 @@ fn safe_path(root: &Path, rel: &str) -> Option<PathBuf> {
     let canon_root = root.canonicalize().ok()?;
     let canon = p.canonicalize().ok()?;
     (canon.starts_with(&canon_root) && canon.is_file()).then_some(canon)
+}
+
+/// Ruta relativa con '/' (sin codificar), como la guarda la biblioteca.
+fn rel_path(root: &Path, p: &Path) -> String {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let p = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let r = p.strip_prefix(&root).unwrap_or(&p);
+    r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
+}
+
+fn edit_start(stream: &mut TcpStream, srv: &Srv, root: &Path, body: &[u8]) -> std::io::Result<()> {
+    let Some(j) = crate::json::parse(&String::from_utf8_lossy(body)) else { return error(stream, "Proyecto inválido") };
+    let project = match crate::editor::Project::from_json(&j) {
+        Ok(p) => p,
+        Err(e) => return error(stream, &e),
+    };
+    let mut inputs = Vec::new();
+    for seg in &project.segments {
+        match safe_path(root, &seg.file) {
+            Some(p) => inputs.push(p),
+            None => return error(stream, &format!("No se encuentra el vídeo {}", seg.file)),
+        }
+    }
+    let id = crate::editor::start(srv.ffmpeg.clone(), root.to_path_buf(), project, inputs);
+    json(stream, Json::Obj(vec![("id".into(), Json::str(&id))]))
 }
 
 fn rel_url(root: &Path, p: &Path) -> String {

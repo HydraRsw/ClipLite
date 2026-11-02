@@ -108,6 +108,28 @@ En el reproductor aparecen como casillas debajo del vídeo: desmarca **Discord**
 - Editores como DaVinci Resolve o Premiere muestran cada pista con su nombre.
 - Necesita Windows 11 o Windows 10 versión 2004 o posterior. En versiones anteriores se graba solo la pista "Todo", como siempre.
 
+## Editor
+
+Pulsa **✂ Editar** mientras ves un clip o una partida, o el icono de tijeras de la barra lateral.
+
+- **Recortar:** arrastra los tiradores rojos, o coloca la reproducción y pulsa **I** (inicio) u **O** (fin).
+- **Partir:** **S** divide el trozo en el punto actual. Así quitas una parte del medio: partes dos veces y quitas el trozo central.
+- **Unir:** añade más clips o trozos de cualquier partida desde la columna derecha y ordénalos con ◀ ▶.
+- **Velocidad** por trozo: 0,25× a 2× (cámara lenta sin cambiar el tono del sonido).
+- **Texto** por trozo: arriba, en el centro o abajo. Los emojis no se muestran.
+- **Formato:**
+  - Original 16:9.
+  - **Vertical 9:16** para TikTok, Shorts o Reels; con el control "Encuadre" eliges qué parte de la pantalla se ve.
+  - **Vertical con fondo** desenfocado.
+  - Cuadrado 1:1.
+- **Pistas de audio:** quita Discord, el micrófono, etc.
+- **Fundido** al inicio y al final, y 60 o 30 fps.
+- **Calidad:** Alta, 720p o **Discord (menos de 10 MB)**, que ajusta la calidad para que quepa en el límite gratuito.
+
+La vista previa muestra el resultado (formato, texto, velocidad y pistas) antes de exportar. Se exporta con la GPU, con una barra de progreso que puedes cancelar. El resultado se guarda en `<juego>\Editados\` y aparece en la partida como "✂ Editado". **Los vídeos originales nunca se modifican.** El proyecto se recuerda aunque cierres el reproductor.
+
+Atajos del editor: `Espacio` reproducir · `I` `O` inicio y fin · `S` partir · `Supr` quitar trozo · `←` `→` 1 segundo · `,` `.` fotograma a fotograma.
+
 ## Borrar vídeos viejos
 
 - **Automático:** clic derecho en el icono › **Borrar vídeos viejos automáticamente** › Nunca / 7 / 14 / 30 / 90 días. Se revisa al abrir ClipLite y después de cada partida. También puedes poner un tope de espacio con `limite_espacio_gb` en la configuración: si los vídeos lo superan, se borran empezando por los más antiguos.
@@ -151,5 +173,6 @@ Si no quieres que se abra solo, pon `abrir_reproductor = no` en la configuració
 | `events.rs` | detección de momentos de LoL y CS2 |
 | `library.rs`, `player.html` | biblioteca de partidas y reproductor |
 | `server.rs` | servidor local del reproductor: vídeos, mezcla de pistas y copias |
+| `editor.rs` | editor: convierte el proyecto en una orden de FFmpeg, exporta en segundo plano |
 | `config.rs`, `json.rs`, `util.rs`, `log.rs` | utilidades |
 | `headless.rs` | banco de pruebas que simula una partida (solo fuera de Windows) |

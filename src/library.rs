@@ -104,6 +104,42 @@ fn file_size(out_root: &Path, rel: Option<&str>) -> u64 {
     rel.and_then(|r| std::fs::metadata(out_root.join(r)).ok()).map_or(0, |m| m.len())
 }
 
+/// Añade un vídeo editado a su partida (o a una nueva entrada "Editados" si no hay partida).
+pub fn add_edited(out_root: &Path, session: &str, rel_file: &Path, dur: f64) -> std::io::Result<()> {
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut list = load(out_root);
+    let clip = Json::Obj(vec![
+        ("file".into(), Json::str(&rel(out_root, &out_root.join(rel_file)))),
+        ("label".into(), Json::str("editado")),
+        ("t".into(), num(0.0)),
+        ("dur".into(), num(dur)),
+        ("edited".into(), Json::Bool(true)),
+    ]);
+    let target = list.iter_mut().find(|s| s.get("id").and_then(Json::as_str) == Some(session));
+    match target {
+        Some(s) => {
+            if let Some(Json::Arr(clips)) = s.get_mut("clips") {
+                clips.push(clip);
+            }
+        }
+        None => {
+            let ts = crate::util::timestamp();
+            list.push(Json::Obj(vec![
+                ("id".into(), Json::str(&format!("Editados_{ts}"))),
+                ("game".into(), Json::str("Editados")),
+                ("date".into(), Json::str(&ts)),
+                ("duration".into(), num(dur)),
+                ("match".into(), Json::Null),
+                ("clips".into(), Json::Arr(vec![clip])),
+                ("tracks".into(), Json::Arr(vec![])),
+                ("events".into(), Json::Arr(vec![])),
+            ]));
+        }
+    }
+    save(out_root, &list)?;
+    write_html(out_root, &list).map(|_| ())
+}
+
 // ------------------------------------------------------------------ Favoritos y borrado
 
 /// Marca o desmarca un clip como favorito (los favoritos nunca se borran automáticamente).

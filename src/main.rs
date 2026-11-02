@@ -13,6 +13,7 @@ mod log;
 mod audio;
 mod config;
 mod controller;
+mod editor;
 mod events;
 mod json;
 mod library;

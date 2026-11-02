@@ -122,6 +122,51 @@ video#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;back
 .row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border:0}
 .panel p{color:var(--dim);font-size:13px;margin:8px 0}
+/* editor */
+.edname{width:320px}
+.ed{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:minmax(0,1fr);gap:0 18px;padding:0 22px 14px}
+.edleft{display:flex;flex-direction:column;min-height:0;min-width:0}
+.edright{display:flex;flex-direction:column;gap:12px;overflow-y:auto;min-height:0;scrollbar-width:thin}
+.edstage{position:relative;flex:1;min-height:160px;background:#000;border-radius:var(--r);display:grid;place-items:center;overflow:hidden}
+.edframe{position:relative;max-width:100%;max-height:100%;height:100%;overflow:hidden;background:#000;container-type:size}
+.edframe video{position:absolute;inset:0;width:100%;height:100%}
+.edbg{object-fit:cover;filter:blur(18px) brightness(.8);transform:scale(1.15)}
+.edtext{position:absolute;left:4%;right:4%;text-align:center;color:#fff;font-weight:800;-webkit-text-stroke:0;text-shadow:0 0 4px #000,0 0 4px #000,2px 2px 3px #000;white-space:nowrap;overflow:hidden;pointer-events:none;font-family:Arial,"Segoe UI",sans-serif}
+.edtext.top{top:7%}.edtext.center{top:50%;transform:translateY(-50%)}.edtext.bottom{bottom:14%}
+.edempty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--dim);padding:20px}
+.edtrans{display:flex;align-items:center;gap:10px;padding:10px 2px 6px;font-size:13px;color:var(--dim);flex:none}
+.edtime{font-variant-numeric:tabular-nums;color:var(--text)}
+.note{font-size:12px;color:var(--faint)}
+.edtl{position:relative;display:flex;gap:3px;height:52px;flex:none;background:var(--panel);border-radius:8px;padding:4px}
+.edseg{min-width:0;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:0 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);overflow:hidden;text-align:left}
+.edseg .nm{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.edseg .dd{font-size:11px;color:var(--dim);white-space:nowrap}
+.edseg.on{border-color:var(--accent);background:#2a1d22}
+.edhead{position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;left:0}
+.edpanel{flex:none;padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.edrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--dim)}
+.edrow b{color:var(--text)}
+.edrow .g{font-variant-numeric:tabular-nums}
+.edrange{position:relative;height:30px;background:var(--panel2);border-radius:6px;cursor:pointer;touch-action:none}
+.edsel{position:absolute;top:0;bottom:0;background:rgba(229,57,63,.35);border-top:2px solid var(--accent);border-bottom:2px solid var(--accent)}
+.edh{position:absolute;top:-3px;bottom:-3px;width:12px;margin-left:-6px;background:var(--accent);border-radius:4px;cursor:ew-resize;z-index:2}
+.edh::after{content:"";position:absolute;left:5px;top:9px;bottom:9px;width:2px;background:#fff8}
+.edsrchead{position:absolute;top:-4px;bottom:-4px;width:2px;background:#fff;pointer-events:none;z-index:3}
+.edtxt{flex:1;min-width:180px}
+.edsrc{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:220px;overflow-y:auto}
+.edsrcrow{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:var(--panel2);text-align:left}
+.edsrcrow:hover{outline:1px solid var(--line)}
+.edsrcrow span:first-child{flex:1}
+.edsrcrow .g{color:var(--dim);font-size:12px}
+.edsrcrow b{color:var(--accent)}
+.edlbl{font-size:12px;color:var(--dim);margin:10px 0 6px}
+.edchips{display:flex;flex-wrap:wrap;gap:6px}
+.chip.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;margin-top:8px;width:100%;justify-content:center;padding:9px}
+.chip.primary:hover{background:var(--accent2)}
+.chip:disabled{opacity:.45;cursor:default}
+.panel .ok{color:#6fd08c}.panel .err{color:var(--accent2)}
+.panel select{width:100%}
+.panel .edrow select{width:auto}
 .empty{flex:1;display:grid;place-items:center;text-align:center;color:var(--dim);padding:40px}
 .empty h2{color:var(--text);margin:0 0 8px}
 kbd{font:11px "Segoe UI";background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px}
@@ -134,6 +179,7 @@ kbd{font:11px "Segoe UI";background:var(--panel2);border:1px solid var(--line);b
   <nav class="rail">
     <svg class="logo" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="#e5393f" stroke-width="3"/><circle cx="18" cy="18" r="7" fill="#e5393f"/></svg>
     <button id="navAll" class="on"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg><span class="tip">Sesiones</span></button>
+    <button id="navEdit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.6 7.6 20 18M8.6 16.4 20 6"/></svg><span class="tip">Editor</span></button>
     <button id="navSpace"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3H4zm0 5h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm5 3v2h6v-2z"/></svg><span class="tip">Espacio y limpieza</span></button>
     <button id="navFav"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8l2.8 5.8 6.4.9-4.6 4.5 1.1 6.3L12 17.3l-5.7 3 1.1-6.3L2.8 9.5l6.4-.9z"/></svg><span class="tip">Favoritos</span></button>
   </nav>
@@ -178,6 +224,7 @@ const EV = {
   baron: ["Barón", "🟣", "obj"], heraldo: ["Heraldo", "🟪", "obj"], larvas: ["Larvas", "🐛", "obj"],
   atakhan: ["Atakhan", "🟥", "obj"], torre: ["Torre", "🏰", "obj"], inhibidor: ["Inhibidor", "💠", "obj"],
   manual: ["Clip manual", "★", "manual"],
+  editado: ["Editado", "✂", "manual"],
 };
 const COLORS = { kill: "var(--accent)", multi: "var(--gold)", death: "var(--death)", ast: "var(--ast)", obj: "var(--obj)", manual: "var(--manual)" };
 const ev = l => EV[l] || [l.replace(/_/g, " "), "•", "kill"];
@@ -217,7 +264,10 @@ function render() {
   $("#navAll").classList.toggle("on", st.view === "all");
   $("#navFav").classList.toggle("on", st.view === "fav");
   $("#navSpace").classList.toggle("on", st.view === "space");
+  $("#navEdit").classList.toggle("on", st.view === "edit");
+  if (st.view !== "edit" && edv) { edPause(); edv = null; }
   if (st.view === "space") return renderSpace(main);
+  if (st.view === "edit") return renderEditor(main);
 
   if (!sessions.length) {
     main.append(h("div", { class: "empty" }, h("div", {},
@@ -253,6 +303,7 @@ function render() {
     h("h2", { id: "title" }), h("span", { class: "meta", id: "meta" }),
     h("div", { class: "grow" }),
     s.match ? h("button", { class: "chip", id: "fullBtn", onclick: () => playMatch(0) }, "▶ Partida completa") : null,
+    h("button", { class: "chip", onclick: () => openEditor(true), title: "Recortar, unir, cámara lenta, texto, vertical…" }, "✂ Editar"),
     API ? h("button", { class: "chip danger", onclick: deleteSession, title: "Borrar esta partida y sus clips (los favoritos se conservan)" }, "🗑 Borrar partida") : null,
     API ? h("button", { class: "chip", onclick: reveal, title: "Abrir el Explorador con el vídeo seleccionado" }, "Mostrar en carpeta")
         : h("button", { class: "chip", onclick: copyPath, title: "Copiar la ruta del vídeo" }, "Copiar ruta")));
@@ -323,7 +374,7 @@ function clipCard(c, s, showGame) {
     h("div", {},
       h("div", { class: "n" }, h("span", { style: `color:${COLORS[cat]}` }, icon), name, star,
         API ? h("span", { class: "trash", title: "Borrar este clip", onclick: e => { e.stopPropagation(); deleteClip(c); } }, "🗑") : null),
-      h("div", { class: "g" }, showGame ? `${s.game} · ${fdate(s.date)}` : (s.match ? `en ${fmt(c.t)}` : fdate(s.date)))));
+      h("div", { class: "g" }, showGame ? `${s.game} · ${fdate(s.date)}` : c.edited ? "Vídeo editado" : (s.match ? `en ${fmt(c.t)}` : fdate(s.date)))));
 }
 
 function renderFavs(main) {
@@ -494,7 +545,7 @@ function playClip(c, offset, autoplay) {
   st.playing = c;
   load(c.file, offset || 0, autoplay);
   const [name] = ev(c.label);
-  setTitle(name, `${s.game} · ${fdate(s.date)}${s.match ? " · minuto " + fmt(c.t) : ""} · ${fmt(c.dur)}`);
+  setTitle(name, `${s.game} · ${fdate(s.date)}${s.match && !c.edited ? " · minuto " + fmt(c.t) : ""} · ${fmt(c.dur)}`);
   markActive();
 }
 
@@ -528,7 +579,7 @@ function total() {
 function seekSession(t) {
   const s = st.sel;
   if (s.match) return playMatch(t);
-  const c = s.clips.find(c => t >= c.t - 0.5 && t <= c.t + c.dur + 0.5);
+  const c = s.clips.find(c => !c.edited && t >= c.t - 0.5 && t <= c.t + c.dur + 0.5);
   if (c) playClip(c, Math.max(0, t - c.t));
   else toast("Ese momento no se guardó en clip");
 }
@@ -552,7 +603,7 @@ function buildTimeline() {
   const s = st.sel, T = total();
   tl.innerHTML = "";
   tl.append(h("div", { class: "track" }));
-  for (const c of s.clips) {
+  for (const c of s.clips.filter(c => !c.edited)) {
     tl.append(h("div", { class: "band", "data-file": c.file, title: ev(c.label)[0], style: `left:${c.t / T * 100}%;width:${Math.max(0.4, c.dur / T * 100)}%` }));
   }
   tl.append(h("div", { class: "played", id: "played" }));
@@ -675,6 +726,7 @@ function copyPath() {
 }
 
 document.addEventListener("keydown", e => {
+  if (st.view === "edit") return editorKey(e);
   if (!video || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
   const k = e.key.toLowerCase();
   const fr = 1 / 60;
@@ -692,8 +744,438 @@ document.addEventListener("keydown", e => {
 });
 
 $("#navAll").onclick = () => { st.view = "all"; if (!st.sel) pickFirst(); render(); };
+$("#navEdit").onclick = () => openEditor(false);
 $("#navSpace").onclick = () => { st.view = "space"; if (video) video.pause(); render(); };
 $("#navFav").onclick = () => { st.view = "fav"; if (video) video.pause(); render(); };
+
+// ============================================================= EDITOR
+// Proyecto: lista de trozos (archivo + inicio/fin + velocidad + texto) y ajustes de salida.
+// La vista previa reproduce los trozos seguidos en el navegador; "Exportar" lo envía a ClipLite,
+// que lo codifica con la GPU. Los originales nunca se modifican.
+const ED_KEY = "cliplite.editor";
+const SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2];
+const FORMATS = [["original", "Original 16:9"], ["vertical", "Vertical 9:16"], ["vertical_blur", "Vertical con fondo"], ["square", "Cuadrado 1:1"]];
+const QUALITIES = [["alta", "Alta"], ["720p", "720p"], ["discord", "Discord (< 10 MB)"]];
+let proj = null, edv = null, edbg = null, edSel = 0, edCur = 0, edPlaying = false, edJob = null, edSeq = 0;
+const edMixCache = {};
+let segId = 1;
+
+function newProject() {
+  return { name: "", session: "", game: "", format: "original", focus: 0.5, fps: 60, quality: "alta", fade: true, muted: [], width: 1920, height: 1080, segments: [] };
+}
+function edLoad() {
+  try { const p = JSON.parse(localStorage.getItem(ED_KEY) || "null"); if (p && Array.isArray(p.segments)) { p.segments.forEach(g => g.id = segId++); return p; } } catch (e) {}
+  return newProject();
+}
+function edSave() { try { localStorage.setItem(ED_KEY, JSON.stringify(proj)); } catch (e) {} }
+const segDur = g => Math.max(0, g.out - g.in) / g.speed;
+const projDur = () => proj.segments.reduce((a, g) => a + segDur(g), 0);
+const segStart = i => proj.segments.slice(0, i).reduce((a, g) => a + segDur(g), 0);
+const sessionOfFile = f => sessions.find(s => s.match === f || s.clips.some(c => c.file === f));
+
+/** Crea un trozo desde un clip o desde la partida completa (alrededor de `around`, en segundos). */
+function makeSeg(s, c, around) {
+  if (c) return { id: segId++, file: c.file, label: ev(c.label)[0], in: 0, out: c.dur, srcDur: c.dur, speed: 1, text: "", text_pos: "top", tracks: s.tracks || [] };
+  const D = s.duration || 30;
+  const a = around == null ? 0 : Math.max(0, around - 15);
+  return { id: segId++, file: s.match, label: "Partida", in: a, out: Math.min(D, a + 30), srcDur: D, speed: 1, text: "", text_pos: "top", tracks: s.tracks || [] };
+}
+
+function addSeg(s, c, around) {
+  if (!proj.segments.length) { proj.session = s.id; proj.game = s.game; if (!proj.name) proj.name = `${s.game} ${c ? ev(c.label)[0] : "partida"} editado`; }
+  proj.segments.push(makeSeg(s, c, around));
+  edSel = proj.segments.length - 1;
+  edSave();
+}
+
+/** Abrir el editor con lo que se está viendo en el reproductor. */
+function openEditor(fromPlayer) {
+  if (!proj) proj = edLoad();
+  if (fromPlayer && st.sel) {
+    const s = st.sel, c = st.playing, t = !c && video ? video.currentTime : null;
+    if (proj.segments.length && !confirm("Ya tienes un proyecto en el editor.\n\nAceptar = añadir este vídeo al proyecto\nCancelar = empezar un proyecto nuevo")) {
+      proj = newProject();
+    }
+    addSeg(s, c, t);
+  }
+  if (video) video.pause();
+  st.view = "edit";
+  render();
+}
+
+// ------------------------------------------------------------- vista
+function renderEditor(main) {
+  if (!proj) proj = edLoad();
+  edSel = Math.min(edSel, Math.max(0, proj.segments.length - 1));
+  main.append(h("header", {},
+    h("div", { class: "crumbs" }, h("span", {}, "Editor")),
+    h("input", { class: "edname", placeholder: "Nombre del vídeo", value: proj.name, oninput: e => { proj.name = e.target.value; edSave(); } }),
+    h("div", { class: "grow" }),
+    h("button", { class: "chip", onclick: () => { if (proj.segments.length && !confirm("¿Empezar un proyecto nuevo? Se quitarán los trozos actuales (los vídeos no se borran).")) return; proj = newProject(); edSave(); render(); } }, "Nuevo proyecto")));
+
+  const wrap = h("section", { class: "ed" });
+  const left = h("div", { class: "edleft" }), right = h("div", { class: "edright" });
+  wrap.append(left, right);
+  main.append(wrap);
+
+  // vista previa
+  const frame = h("div", { class: "edframe", id: "edframe" });
+  edbg = h("video", { class: "edbg", muted: "", preload: "auto" });
+  edv = h("video", { class: "edv", preload: "auto" });
+  edv.addEventListener("timeupdate", edTick);
+  edv.addEventListener("loadedmetadata", edMeta);
+  edv.addEventListener("play", () => { edbg.play().catch(() => {}); });
+  edv.addEventListener("pause", () => edbg.pause());
+  edv.addEventListener("seeked", () => { if (Math.abs(edbg.currentTime - edv.currentTime) > 0.15) edbg.currentTime = edv.currentTime; });
+  frame.append(edbg, edv, h("div", { class: "edtext", id: "edtext" }));
+  left.append(h("div", { class: "edstage" }, frame, h("div", { class: "toast", id: "toast" })));
+
+  if (!proj.segments.length) {
+    frame.append(h("div", { class: "edempty" }, h("div", {}, h("b", {}, "Proyecto vacío"), h("br"), "Añade clips o trozos de una partida desde la derecha, o pulsa “✂ Editar” mientras ves un vídeo.")));
+  }
+
+  // transporte
+  left.append(h("div", { class: "edtrans" },
+    h("button", { class: "chip", id: "edplay", onclick: edToggle, disabled: proj.segments.length ? false : "" }, "▶ Reproducir"),
+    h("span", { id: "edtime", class: "edtime" }, `0:00 / ${fmt(projDur())}`),
+    h("div", { class: "grow" }),
+    h("span", { class: "note" }, h("kbd", {}, "Espacio"), " reproducir · ", h("kbd", {}, "I"), h("kbd", {}, "O"), " inicio/fin · ", h("kbd", {}, "S"), " partir · ", h("kbd", {}, "Supr"), " quitar")));
+
+  // línea de tiempo del proyecto
+  const tl = h("div", { class: "edtl", id: "edtl" });
+  const T = projDur() || 1;
+  proj.segments.forEach((g, i) => {
+    tl.append(h("button", { class: "edseg" + (i === edSel ? " on" : ""), style: `flex:${Math.max(segDur(g), T * 0.04)}`, onclick: () => { edSel = i; edSeekProj(segStart(i), false); edRenderPanel(); edMarkSel(); } },
+      h("span", { class: "nm" }, `${i + 1}. ${g.label}`), h("span", { class: "dd" }, fmt(segDur(g)) + (g.speed !== 1 ? ` · ${g.speed}×` : "") + (g.text ? " · T" : ""))));
+  });
+  tl.append(h("div", { class: "edhead", id: "edhead" }));
+  left.append(tl);
+  left.append(h("div", { class: "edpanel", id: "edpanel" }));
+
+  // panel derecho
+  right.append(edSourcesPanel(), edOutputPanel());
+
+  edFrameShape();
+  edRenderPanel();
+  if (proj.segments.length) edSeekProj(edCur = Math.min(edCur, projDur()), false);
+}
+
+function edMarkSel() {
+  document.querySelectorAll(".edseg").forEach((b, i) => b.classList.toggle("on", i === edSel));
+}
+
+function edSourcesPanel() {
+  const box = h("div", { class: "panel" }, h("h3", {}, "Añadir trozos"));
+  const sel = h("select", { onchange: () => fill() }, sessions.map(s => h("option", { value: s.id, selected: s.id === (proj.session || (st.sel && st.sel.id)) ? "" : false }, `${s.game} · ${fdate(s.date)}`)));
+  const list = h("div", { class: "edsrc" });
+  const fill = () => {
+    const s = sessions.find(x => x.id === sel.value) || sessions[0];
+    list.innerHTML = "";
+    if (!s) return;
+    const row = (label, sub, fn) => list.append(h("button", { class: "edsrcrow", onclick: fn }, h("span", {}, label), h("span", { class: "g" }, sub), h("b", {}, "+")));
+    if (s.match) row("Partida completa", fmt(s.duration), () => { addSeg(s, null, 15); render(); });
+    for (const c of s.clips) row(ev(c.label)[0], fmt(c.dur), () => { addSeg(s, c); render(); });
+  };
+  fill();
+  box.append(sel, list);
+  return box;
+}
+
+function edOutputPanel() {
+  const box = h("div", { class: "panel" }, h("h3", {}, "Salida"));
+  // formato
+  box.append(h("div", { class: "edlbl" }, "Formato"),
+    h("div", { class: "edchips" }, FORMATS.map(([k, n]) => h("button", { class: "chip" + (proj.format === k ? " on" : ""), onclick: () => { proj.format = k; edSave(); render(); } }, n))));
+  if (proj.format !== "original" && proj.format !== "vertical_blur") {
+    box.append(h("div", { class: "edlbl" }, "Encuadre (qué parte de la pantalla se ve)"),
+      h("input", { type: "range", min: 0, max: 1, step: 0.01, value: proj.focus, style: "width:100%", oninput: e => { proj.focus = +e.target.value; edSave(); edFrameShape(); } }));
+  }
+  // audio
+  const names = [...new Set(proj.segments.flatMap(g => (g.tracks || []).slice(1)))];
+  if (names.length) {
+    box.append(h("div", { class: "edlbl" }, "Pistas de audio"),
+      h("div", { class: "edchips" }, names.map(n => {
+        const on = !proj.muted.includes(n);
+        return h("button", { class: "trk " + (on ? "on" : "off"), onclick: () => {
+          proj.muted = on ? [...proj.muted, n] : proj.muted.filter(x => x !== n); edSave(); render(); } },
+          h("span", { class: "box" }, on ? "✓" : ""), TRACK_ICON(n) + " " + n);
+      })));
+  }
+  // opciones
+  box.append(h("div", { class: "edrow" },
+    h("label", {}, h("input", { type: "checkbox", checked: proj.fade ? "" : false, onchange: e => { proj.fade = e.target.checked; edSave(); } }), " Fundido al inicio y al final"),
+    h("select", { onchange: e => { proj.fps = +e.target.value; edSave(); } }, [60, 30].map(f => h("option", { value: f, selected: proj.fps === f ? "" : false }, f + " fps")))));
+  box.append(h("div", { class: "edlbl" }, "Calidad"),
+    h("div", { class: "edchips" }, QUALITIES.map(([k, n]) => h("button", { class: "chip" + (proj.quality === k ? " on" : ""), onclick: () => { proj.quality = k; edSave(); render(); } }, n))));
+  const T = projDur();
+  const est = proj.quality === "discord" ? "menos de 10 MB" : "≈ " + human(((proj.quality === "720p" ? 6 : 20) * 1e6 + 128e3) * T / 8);
+  box.append(h("p", {}, `Duración: ${fmt(T)} · Tamaño: ${est}`));
+  // exportar
+  const exp = h("div", { id: "edexport" });
+  box.append(exp);
+  edRenderExport(exp);
+  return box;
+}
+
+function edRenderExport(box) {
+  box = box || $("#edexport");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!API) { box.append(h("p", {}, "Abre el reproductor desde ClipLite (doble clic en su icono) para poder exportar.")); return; }
+  if (edJob && edJob.state === "running") {
+    box.append(h("div", { class: "bar" }, h("i", { style: `width:${Math.round((edJob.progress || 0) * 100)}%` })),
+      h("div", { class: "edrow" }, h("span", {}, `Exportando… ${Math.round((edJob.progress || 0) * 100)} %`),
+        h("button", { class: "chip", onclick: () => api("edit_cancel", { id: edJob.id }) }, "Cancelar")));
+    return;
+  }
+  if (edJob && edJob.state === "done") {
+    box.append(h("p", { class: "ok" }, `✓ Guardado: ${edJob.name} (${edJob.size})`),
+      h("div", { class: "edrow" },
+        h("button", { class: "chip", onclick: () => { location.hash = "#s=" + encodeURIComponent(proj.session || ""); location.reload(); } }, "Ver en la biblioteca"),
+        h("button", { class: "chip", onclick: () => api("reveal", { file: edJob.file }) }, "Mostrar en carpeta")));
+  } else if (edJob && edJob.state === "failed") {
+    box.append(h("p", { class: "err" }, "No se pudo exportar. Mira el registro (log.txt) para más detalles."));
+  } else if (edJob && edJob.state === "cancelled") {
+    box.append(h("p", {}, "Exportación cancelada."));
+  }
+  box.append(h("button", { class: "chip primary", disabled: proj.segments.length ? false : "", onclick: edExport }, "⬇ Exportar vídeo"));
+}
+
+async function edExport() {
+  if (!proj.segments.length) return;
+  edPause();
+  const body = JSON.stringify({ ...proj, segments: proj.segments.map(g => ({ file: g.file, in: g.in, out: g.out, speed: g.speed, text: g.text, text_pos: g.text_pos, tracks: g.tracks })) });
+  try {
+    const r = await (await fetch(`/api/edit?t=${API}`, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
+    if (r.error) { toast(r.error); return; }
+    edJob = { id: r.id, state: "running", progress: 0 };
+    edRenderExport();
+    const poll = async () => {
+      const s = await api("edit_status", { id: edJob.id });
+      edJob = { ...edJob, ...s };
+      edRenderExport();
+      if (s.state === "running") setTimeout(poll, 500);
+    };
+    setTimeout(poll, 300);
+  } catch (e) { toast("No se pudo exportar"); }
+}
+
+// ------------------------------------------------------------- panel del trozo seleccionado
+function edRenderPanel() {
+  const box = $("#edpanel");
+  if (!box) return;
+  box.innerHTML = "";
+  const g = proj.segments[edSel];
+  if (!g) return;
+  const bar = h("div", { class: "edrange", id: "edrange" });
+  const pct = x => (x / (g.srcDur || g.out || 1) * 100) + "%";
+  const sel = h("div", { class: "edsel", style: `left:${pct(g.in)};width:calc(${pct(g.out)} - ${pct(g.in)})` });
+  const hin = h("div", { class: "edh", style: `left:${pct(g.in)}`, title: "Arrastra para cambiar el inicio" });
+  const hout = h("div", { class: "edh", style: `left:${pct(g.out)}`, title: "Arrastra para cambiar el final" });
+  bar.append(sel, hin, hout, h("div", { class: "edsrchead", id: "edsrchead" }));
+  const timeAt = e => { const r = bar.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (g.srcDur || g.out); };
+  const drag = which => e => {
+    e.preventDefault(); e.stopPropagation();
+    edPause();
+    const move = ev2 => {
+      const t = timeAt(ev2);
+      if (which === "in") g.in = Math.min(t, g.out - 0.2); else g.out = Math.max(t, g.in + 0.2);
+      sel.style.left = pct(g.in); sel.style.width = `calc(${pct(g.out)} - ${pct(g.in)})`;
+      hin.style.left = pct(g.in); hout.style.left = pct(g.out);
+      $("#edinout").textContent = `${fmtp(g.in)} → ${fmtp(g.out)} (${fmtp(g.out - g.in)})`;
+      edShowSource(edSel, which === "in" ? g.in : g.out);
+    };
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); edSave(); render(); };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  };
+  hin.onpointerdown = drag("in"); hout.onpointerdown = drag("out");
+  bar.onclick = e => { edPause(); edShowSource(edSel, timeAt(e)); };
+
+  const sp = h("select", { onchange: e => { g.speed = +e.target.value; edSave(); render(); } }, SPEEDS.map(v => h("option", { value: v, selected: g.speed === v ? "" : false }, v === 1 ? "Normal" : v + "×")));
+  const pos = h("select", { onchange: e => { g.text_pos = e.target.value; edSave(); edUpdateText(); } }, [["top", "Arriba"], ["center", "Centro"], ["bottom", "Abajo"]].map(([k, n]) => h("option", { value: k, selected: g.text_pos === k ? "" : false }, n)));
+  box.append(
+    h("div", { class: "edrow" }, h("b", {}, `Trozo ${edSel + 1}: ${g.label}`), h("span", { class: "g", id: "edinout" }, `${fmtp(g.in)} → ${fmtp(g.out)} (${fmtp(g.out - g.in)})`), h("div", { class: "grow" }),
+      h("button", { class: "chip", onclick: () => edMove(-1), disabled: edSel === 0 ? "" : false, title: "Mover antes" }, "◀"),
+      h("button", { class: "chip", onclick: () => edMove(1), disabled: edSel === proj.segments.length - 1 ? "" : false, title: "Mover después" }, "▶"),
+      h("button", { class: "chip", onclick: edDuplicate }, "Duplicar"),
+      h("button", { class: "chip danger", onclick: edDelete }, "Quitar")),
+    bar,
+    h("div", { class: "edrow" },
+      h("button", { class: "chip", onclick: () => edSetPoint("in") }, "[ Inicio aquí"),
+      h("button", { class: "chip", onclick: () => edSetPoint("out") }, "Fin aquí ]"),
+      h("button", { class: "chip", onclick: edSplit }, "✂ Partir aquí"),
+      h("div", { class: "grow" }), "Velocidad", sp),
+    h("div", { class: "edrow" }, "Texto",
+      h("input", { class: "edtxt", maxlength: 120, placeholder: "Texto sobre este trozo (opcional)", value: g.text, oninput: e => { g.text = e.target.value; edSave(); edUpdateText(); } }), pos));
+  edUpdateSourceHead();
+}
+const fmtp = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s % 60).toFixed(1).padStart(4, "0")}`; };
+
+// ------------------------------------------------------------- edición
+function edMove(d) {
+  const i = edSel, j = i + d, a = proj.segments;
+  if (j < 0 || j >= a.length) return;
+  [a[i], a[j]] = [a[j], a[i]]; edSel = j; edSave(); render();
+}
+function edDuplicate() { const g = proj.segments[edSel]; proj.segments.splice(edSel + 1, 0, { ...g, id: segId++ }); edSel++; edSave(); render(); }
+function edDelete() { proj.segments.splice(edSel, 1); edSel = Math.max(0, edSel - 1); edCur = 0; edSave(); render(); }
+/** Tiempo actual dentro del vídeo original del trozo seleccionado. */
+function edSourceTime() {
+  const g = proj.segments[edSel];
+  if (!g || !edv) return null;
+  return edv.dataset.seg == String(g.id) ? edv.currentTime : g.in;
+}
+function edSetPoint(which) {
+  const g = proj.segments[edSel], t = edSourceTime();
+  if (!g || t == null) return;
+  if (which === "in") { if (t >= g.out - 0.2) return toast("El inicio debe ir antes del final"); g.in = t; }
+  else { if (t <= g.in + 0.2) return toast("El final debe ir después del inicio"); g.out = t; }
+  edSave(); render(); toast(which === "in" ? "Inicio marcado" : "Final marcado");
+}
+function edSplit() {
+  const g = proj.segments[edSel], t = edSourceTime();
+  if (!g || t == null) return;
+  if (t <= g.in + 0.2 || t >= g.out - 0.2) return toast("Coloca la reproducción dentro del trozo para partirlo");
+  const b = { ...g, id: segId++, in: t };
+  g.out = t;
+  proj.segments.splice(edSel + 1, 0, b);
+  edSave(); render(); toast("Trozo partido en dos");
+}
+
+// ------------------------------------------------------------- vista previa
+function edFrameShape() {
+  const f = $("#edframe");
+  if (!f) return;
+  const ar = { original: `${proj.width}/${proj.height}`, vertical: "9/16", vertical_blur: "9/16", square: "1/1" }[proj.format];
+  f.style.aspectRatio = ar;
+  const cover = proj.format === "vertical" || proj.format === "square";
+  edv.style.objectFit = cover ? "cover" : "contain";
+  edv.style.objectPosition = `${proj.focus * 100}% 50%`;
+  edbg.style.display = proj.format === "vertical_blur" ? "" : "none";
+}
+function edUpdateText() {
+  const el = $("#edtext"), g = proj.segments[edSel];
+  if (!el) return;
+  const t = g ? g.text.trim() : "";
+  el.textContent = t;
+  el.style.display = t ? "" : "none";
+  el.className = "edtext " + (g ? g.text_pos : "top");
+  const f = $("#edframe");
+  if (f && t) el.style.fontSize = Math.min(f.clientHeight * 0.055, f.clientWidth * 1.55 / t.length) + "px";
+}
+async function edSrcUrl(g) {
+  if (!proj.muted.length || !API) return src(g.file);
+  const names = g.tracks || [];
+  const keep = names.map((n, k) => k).filter(k => k > 0 && !proj.muted.includes(names[k]));
+  const key = g.file + "|" + keep.join(",");
+  if (!edMixCache[key]) {
+    try { const r = await api("mix", { file: g.file, keep: keep.join(",") }); edMixCache[key] = r.url || src(g.file); }
+    catch (e) { edMixCache[key] = src(g.file); }
+  }
+  return edMixCache[key];
+}
+/** Muestra el trozo i en el instante t de su vídeo original. */
+async function edShowSource(i, t, play) {
+  const g = proj.segments[i];
+  if (!g || !edv) return;
+  const seq = ++edSeq;
+  const url = await edSrcUrl(g);
+  if (seq !== edSeq) return;
+  if (edv.dataset.seg !== String(g.id) || edv.getAttribute("src") !== url) {
+    edv.dataset.seg = String(g.id);
+    edv.dataset.idx = i;
+    if (edv.getAttribute("src") !== url) {
+      edv.setAttribute("src", url);
+      edbg.setAttribute("src", url);
+      await new Promise(r => edv.addEventListener("loadedmetadata", r, { once: true }));
+      if (seq !== edSeq) return;
+    }
+  }
+  edv.dataset.idx = i;
+  edv.playbackRate = g.speed;
+  edv.currentTime = t;
+  edbg.currentTime = t;
+  if (play) edv.play().catch(() => {});
+  if (i !== edSel) { edSel = i; edRenderPanel(); edMarkSel(); }
+  edUpdateText();
+}
+function edSeekProj(T, play) {
+  let acc = 0;
+  for (let i = 0; i < proj.segments.length; i++) {
+    const d = segDur(proj.segments[i]);
+    if (T < acc + d || i === proj.segments.length - 1) {
+      const g = proj.segments[i];
+      edShowSource(i, g.in + Math.max(0, Math.min(T - acc, d)) * g.speed, play);
+      return;
+    }
+    acc += d;
+  }
+}
+function edToggle() { edPlaying ? edPause() : edPlay(); }
+function edPlay() {
+  if (!proj.segments.length) return;
+  edPlaying = true;
+  const b = $("#edplay"); if (b) b.textContent = "❚❚ Pausa";
+  let T = edProjTime();
+  if (T >= projDur() - 0.05) T = 0;
+  edSeekProj(T, true);
+}
+function edPause() {
+  edPlaying = false;
+  if (edv) edv.pause();
+  const b = $("#edplay"); if (b) b.textContent = "▶ Reproducir";
+}
+/** Posición en el proyecto según lo que muestra el vídeo. */
+function edProjTime() {
+  const i = +(edv && edv.dataset.idx || 0), g = proj.segments[i];
+  if (!g) return 0;
+  return segStart(i) + Math.max(0, Math.min(edv.currentTime - g.in, g.out - g.in)) / g.speed;
+}
+function edTick() {
+  const i = +(edv.dataset.idx || 0), g = proj.segments[i];
+  if (!g) return;
+  if (edPlaying && edv.currentTime >= g.out - 0.02) {
+    if (i + 1 < proj.segments.length) edShowSource(i + 1, proj.segments[i + 1].in, true);
+    else { edPause(); edv.currentTime = g.out; }
+  }
+  if (Math.abs(edbg.currentTime - edv.currentTime) > 0.3) edbg.currentTime = edv.currentTime;
+  edCur = edProjTime();
+  const T = projDur() || 1;
+  const head = $("#edhead"); if (head) head.style.left = (edCur / T * 100) + "%";
+  const tt = $("#edtime"); if (tt) tt.textContent = `${fmtp(edCur)} / ${fmtp(projDur())}`;
+  edUpdateSourceHead();
+}
+function edUpdateSourceHead() {
+  const g = proj.segments[edSel], hd = $("#edsrchead");
+  if (!g || !hd || !edv) return;
+  const t = edv.dataset.seg == String(g.id) ? edv.currentTime : g.in;
+  hd.style.left = (t / (g.srcDur || g.out || 1) * 100) + "%";
+}
+function edMeta() {
+  // Duración real del vídeo original y tamaño (para el formato "Original").
+  const i = +(edv.dataset.idx || 0), g = proj.segments[i];
+  if (!g || !isFinite(edv.duration)) return;
+  let changed = false;
+  for (const x of proj.segments) if (x.file === g.file && Math.abs((x.srcDur || 0) - edv.duration) > 0.05) { x.srcDur = edv.duration; x.out = Math.min(x.out, edv.duration); changed = true; }
+  if (i === 0 && edv.videoWidth && (proj.width !== edv.videoWidth || proj.height !== edv.videoHeight)) {
+    proj.width = edv.videoWidth; proj.height = edv.videoHeight; changed = true; edFrameShape();
+  }
+  if (changed) { edSave(); edRenderPanel(); }
+}
+
+function editorKey(e) {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  const k = e.key.toLowerCase();
+  if (k === " ") { e.preventDefault(); edToggle(); }
+  else if (k === "i") edSetPoint("in");
+  else if (k === "o") edSetPoint("out");
+  else if (k === "s") edSplit();
+  else if (k === "delete" || k === "backspace") { if (proj.segments.length) edDelete(); }
+  else if (k === "arrowright") { e.preventDefault(); edPause(); edSeekProj(Math.min(projDur(), edProjTime() + 1)); }
+  else if (k === "arrowleft") { e.preventDefault(); edPause(); edSeekProj(Math.max(0, edProjTime() - 1)); }
+  else if (k === ".") { edPause(); edv.currentTime += 1 / 60; }
+  else if (k === ",") { edPause(); edv.currentTime -= 1 / 60; }
+}
 
 // Favoritos: la biblioteca es la fuente (así la limpieza automática los respeta). Los marcados
 // antes solo en este navegador se envían una vez a ClipLite.
@@ -705,6 +1187,7 @@ saveFavs();
 
 // sesión pedida en la URL (#s=...) o la más reciente; vista (#v=espacio)
 if (/v=espacio/.test(location.hash)) st.view = "space";
+if (/v=editor/.test(location.hash)) st.view = "edit";
 const want = decodeURIComponent((location.hash.match(/s=([^&]+)/) || [])[1] || "");
 st.sel = sessions.find(s => s.id === want) || sessions[0] || null;
 render();
