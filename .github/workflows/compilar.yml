@@ -101,6 +101,58 @@ jobs:
           name: publicar-android
           path: publicar
 
+  # Prueba real en un emulador Android (no bloquea la publicación).
+  android-prueba:
+    needs: [android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClipLite-Android
+          path: apk
+      - name: Activar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: ffmpeg
+        run: sudo apt-get install -y -qq ffmpeg >/dev/null
+      - name: Emulador y prueba
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash android/pruebas/emulador.sh apk/ClipLite-Android.apk
+      - name: Analizar vídeos
+        if: always()
+        run: |
+          cd resultado || exit 0
+          for f in *.mp4; do
+            [ -f "$f" ] || continue
+            echo "== $f ($(stat -c %s "$f") bytes)"
+            ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,avg_frame_rate,duration -show_entries format=duration -of compact "$f"
+            ffmpeg -v error -i "$f" -f null - && echo "   decodifica sin errores"
+            ffmpeg -v error -y -ss 1 -i "$f" -frames:v 1 -vf scale=480:-1 "fotograma_${f%.mp4}.png"
+          done
+      - name: Guardar capturas en la rama pruebas-android
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd resultado || exit 0
+          rm -f *.mp4 ui.xml
+          for p in *.png; do [ -f "$p" ] && ffmpeg -v error -y -i "$p" -vf "scale='min(540,iw)':-1" "small_$p" && mv "small_$p" "$p"; done
+          git init -q . && git checkout -q -b pruebas-android
+          git -c user.name="ClipLite CI" -c user.email="ci@invalid" add -A
+          git -c user.name="ClipLite CI" -c user.email="ci@invalid" commit -q -m "Prueba en emulador ${{ github.run_number }}"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" pruebas-android
+
   publicar:
     needs: [windows, android]
     # Si la app Android fallara, la versión de PC se publica igualmente.

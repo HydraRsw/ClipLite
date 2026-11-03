@@ -225,7 +225,14 @@ class Engine(
                 mixed.putShort((game[2 * i + 1] + v).coerceIn(-32768, 32767).toShort())
             }
             mixed.flip()
-            val pts = baseUs + total * 1_000_000L / RATE
+            var pts = baseUs + total * 1_000_000L / RATE
+            // Si Android dejó de entregar sonido un rato (pausa, llamada…), re-sincronizar con el reloj
+            // para que el audio no quede adelantado respecto al vídeo.
+            val nowStart = System.nanoTime() / 1000 - got * 1_000_000L / RATE
+            if (nowStart - pts > 200_000) {
+                baseUs += nowStart - pts
+                pts = nowStart
+            }
             total += got
             val inIdx = codec.dequeueInputBuffer(10_000)
             if (inIdx >= 0) {
