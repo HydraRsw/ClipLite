@@ -20,12 +20,21 @@ pub fn run() {
         }
         return;
     }
+    // `ClipLite qr <texto>` escribe el SVG del código QR (para verificarlo con un lector).
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 3 && args[1] == "qr" {
+        print!("{}", crate::qr::svg(&args[2]).unwrap_or_default());
+        return;
+    }
     // Modo servidor: `ClipLite servir` sirve el reproductor de CLIPLITE_OUT durante 10 minutos.
     if std::env::args().any(|a| a == "servir") {
         let out = std::path::PathBuf::from(std::env::var("CLIPLITE_OUT").unwrap_or_else(|_| "cliplite_out".into()));
         let ffmpeg = crate::util::find_ffmpeg("").expect("ffmpeg en el PATH");
         let (tx, _rx) = channel();
         crate::server::start(out, ffmpeg, tx);
+        if std::env::var("CLIPLITE_MOVIL").is_ok() {
+            crate::server::set_mobile(true);
+        }
         println!("{}", crate::server::base_url().unwrap_or_default());
         std::thread::sleep(Duration::from_secs(600));
         return;

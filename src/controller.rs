@@ -101,6 +101,7 @@ impl Controller {
     pub fn run(mut self, rx: Receiver<Cmd>) {
         let _ = std::fs::create_dir_all(&self.cfg.output_dir);
         crate::server::start(self.cfg.output_dir.clone(), self.ffmpeg.clone(), self.tx.clone());
+        crate::server::set_mobile(self.cfg.mobile);
         self.spawn_update_checker();
         recorder::recover_leftovers(&self.cfg.output_dir.join(".buffer"), &self.cfg.output_dir, &self.jobs);
         self.encoder = recorder::probe_encoder(&self.ffmpeg, &self.cfg);
@@ -206,6 +207,7 @@ impl Controller {
                     || new.bitrate_mbps != self.cfg.bitrate_mbps
                     || new.monitor != self.cfg.monitor;
                 self.auto_update.store(new.auto_update, Ordering::SeqCst);
+                crate::server::set_mobile(new.mobile);
                 self.cfg = new;
                 crate::server::set_root(self.cfg.output_dir.clone());
                 if enc_changed {

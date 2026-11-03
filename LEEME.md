@@ -152,6 +152,22 @@ Atajos del editor: `Espacio` reproducir · `I` `O` inicio y fin · `S` partir ·
   - Lo que borras a mano va a la **Papelera de reciclaje**; la limpieza automática borra definitivamente, porque si no, no liberaría espacio.
   - Solo se tocan vídeos creados por ClipLite.
 
+## Ver tus clips en el móvil
+
+1. En el PC: Configuración › General › **Ver mis clips desde el móvil**. Aparece un código QR.
+2. Escanéalo con la cámara del móvil, que debe estar en la misma Wi-Fi que el PC. Se abre ClipLite en el navegador del móvil, adaptado a pantalla pequeña.
+3. Ahí puedes ver partidas y clips, **descargarlos** al móvil para subirlos a TikTok, Instagram o WhatsApp, marcar favoritos e incluso editar: la exportación la hace la GPU del PC.
+
+La primera vez Windows puede preguntar si ClipLite puede usar la red: permite **redes privadas**.
+
+**Seguridad:**
+- Solo funciona dentro de tu red.
+- El código lleva una clave secreta de 128 bits; sin ella no se ve nada.
+- Desde el móvil no se puede cambiar la configuración, abrir carpetas del PC ni instalar actualizaciones.
+- "Cambiar código" desconecta todos los móviles emparejados.
+
+Desactívalo en el mismo sitio y el puerto deja de aceptar conexiones.
+
 ## Reproductor
 
 Se abre como ventana de aplicación con Microsoft Edge, que ya viene con Windows, y lo sirve ClipLite desde tu propio PC (`127.0.0.1`, inaccesible desde fuera y protegido con una clave aleatoria). Cuando está cerrado no consume nada. También existe `ClipLite.html` en tu carpeta de vídeos, que funciona sin ClipLite abierto pero sin poder silenciar pistas.
@@ -184,6 +200,7 @@ Si no quieres que se abra solo, pon `abrir_reproductor = no` en la configuració
 | `events.rs` | detección de momentos de LoL y CS2 |
 | `library.rs`, `player.html` | biblioteca de partidas y reproductor |
 | `server.rs` | servidor local del reproductor: vídeos, mezcla de pistas y copias |
+| `qr.rs` | generador de códigos QR (para emparejar el móvil) |
 | `update.rs` | actualizaciones automáticas: consulta, descarga, SHA-256 |
 | `editor.rs` | editor: convierte el proyecto en una orden de FFmpeg, exporta en segundo plano |
 | `config.rs`, `json.rs`, `util.rs`, `log.rs` | utilidades |

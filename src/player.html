@@ -204,6 +204,46 @@ video#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;back
 kbd{font:11px "Segoe UI";background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px}
 .keys{color:var(--faint);font-size:12px;margin-top:10px;line-height:1.9}
 @media (max-width:1000px){.stage{grid-template-columns:1fr}.right{max-height:220px}}
+/* móvil */
+@media (max-width:760px){
+  .app{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
+  .rail{order:2;flex-direction:row;justify-content:space-around;padding:4px 6px calc(4px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--line);gap:0}
+  .rail .logo{display:none}
+  .rail button.on::before{display:none}
+  .rail #navCfg{margin-top:0!important}
+  .tip{display:none}
+  header{padding:10px 12px 6px;flex-wrap:wrap;gap:8px}
+  header input,.edname{width:100%}
+  .crumbs{font-size:17px}
+  .sessions{padding:2px 12px 8px}
+  .card{width:200px;padding:8px}
+  .badge{width:42px;height:42px;font-size:18px}
+  .stage{display:flex;flex-direction:column;overflow-y:auto;padding:0 12px 14px;gap:12px}
+  .left{flex:none;min-height:0}
+  .player{flex:none;aspect-ratio:16/9;min-height:0}
+  .right{max-height:none;flex:none}
+  .titlebar{flex-wrap:wrap}
+  .titlebar h2{width:100%}
+  .keys,.tracks .note{display:none}
+  .clip{grid-template-columns:112px 1fr}
+  .clip .trash{opacity:1}
+  .ed{display:flex;flex-direction:column;overflow-y:auto;padding:0 12px 14px;gap:12px}
+  .edleft{flex:none}
+  .edstage{flex:none;height:52vh}
+  .edtrans .note{display:none}
+  .space,.cfg{grid-template-columns:1fr;padding:6px 12px 16px}
+  .cfgrow{flex-wrap:wrap}
+  .updbar{left:12px;right:12px;bottom:72px}
+  .toast{top:8px}
+  .tlbar{flex-wrap:wrap;row-gap:2px}
+  .tlbar .vlabel{display:none}
+}
+.qrbox{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:10px 0 4px}
+.qrbox .qr{width:170px;height:170px;background:#fff;border-radius:8px;padding:6px;flex:none}
+.qrbox .qr svg{width:100%;height:100%;display:block}
+.qrbox code{font-size:12px;color:var(--dim);word-break:break-all}
+.dl{text-decoration:none;color:var(--text)}
+#tltime{white-space:nowrap;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -278,6 +318,8 @@ const games = [...new Set(sessions.map(s => s.game))];
 const st = { view: "all", game: "", q: "", sel: null, playing: null /* null = partida; objeto clip */, muted: new Set(), busy: false };
 // Con ClipLite abierto el reproductor se sirve desde 127.0.0.1 y puede mezclar pistas de audio.
 const API = location.protocol.startsWith("http") ? new URLSearchParams(location.search).get("t") : null;
+// Abierto desde el móvil (otra dirección que no es este PC): sin configuración ni Explorador.
+const REMOTE = location.protocol.startsWith("http") && !["127.0.0.1", "localhost"].includes(location.hostname);
 const tracksOf = s => (s && s.tracks && s.tracks.length) ? s.tracks : ["Todo"];
 const TRACK_ICON = n => /juego/i.test(n) ? "🎮" : /discord|teamspeak|skype|teams/i.test(n) ? "💬" : /micr/i.test(n) ? "🎙" : /spotify|music|música/i.test(n) ? "🎵" : "🔊";
 const api = (what, params) => fetch(`/api/${what}?t=${API}&` + new URLSearchParams(params)).then(r => r.json());
@@ -340,7 +382,8 @@ function render() {
     s.match ? h("button", { class: "chip", id: "fullBtn", onclick: () => playMatch(0) }, "▶ Partida completa") : null,
     h("button", { class: "chip", onclick: () => openEditor(true), title: "Recortar, unir, cámara lenta, texto, vertical…" }, "✂ Editar"),
     API ? h("button", { class: "chip danger", onclick: deleteSession, title: "Borrar esta partida y sus clips (los favoritos se conservan)" }, "🗑 Borrar partida") : null,
-    API ? h("button", { class: "chip", onclick: reveal, title: "Abrir el Explorador con el vídeo seleccionado" }, "Mostrar en carpeta")
+    REMOTE ? h("a", { class: "chip dl", id: "dlBtn", href: "#", download: "", title: "Guardar el vídeo en el móvil" }, "⬇ Descargar")
+      : API ? h("button", { class: "chip", onclick: reveal, title: "Abrir el Explorador con el vídeo seleccionado" }, "Mostrar en carpeta")
         : h("button", { class: "chip", onclick: copyPath, title: "Copiar la ruta del vídeo" }, "Copiar ruta")));
 
   video = h("video", { id: "v", controls: "", preload: "metadata" });
@@ -361,7 +404,7 @@ function render() {
       h("button", { onclick: () => jumpEvent(-1), title: "Momento anterior (P)" }, "‹ Anterior"),
       h("button", { onclick: () => jumpEvent(1), title: "Momento siguiente (N)" }, "Siguiente ›"),
       h("span", { id: "tltime" }),
-      h("div", { class: "grow" }), "Velocidad", speeds),
+      h("div", { class: "grow" }), h("span", { class: "vlabel" }, "Velocidad"), speeds),
     tl));
   buildTimeline();
 
@@ -540,10 +583,17 @@ function select(s) {
 }
 function pickFirst() { const f = filtered(); if (!f.includes(st.sel)) st.sel = f[0] || null; }
 
+function setDownload(rel) {
+  const a = $("#dlBtn");
+  if (!a || !rel) return;
+  a.href = src(rel);
+  a.setAttribute("download", rel.split("/").pop());
+}
 let loadSeq = 0;
 /** Carga un vídeo (original o con las pistas silenciadas) en el instante `at`. */
 async function load(rel, at, autoplay) {
   const seq = ++loadSeq;
+  setDownload(rel);
   let want = src(rel);
   if (st.muted.size && API) {
     st.busy = true; renderTracks();
@@ -805,7 +855,8 @@ async function installUpdate() {
     try { const u = await api("update", {}); if (u.current && u.current !== before) { location.reload(); return; } } catch (e) {}
   }
 }
-if (API) setTimeout(() => api("update", {}).then(showUpdate).catch(() => {}), 1500);
+if (API && !REMOTE) setTimeout(() => api("update", {}).then(showUpdate).catch(() => {}), 1500);
+if (REMOTE) { const b = $("#navCfg"); if (b) b.style.display = "none"; }
 
 // ============================================================= AJUSTES
 let cfgData = null, cfgTimer = null;
@@ -948,10 +999,28 @@ async function renderSettings(main) {
         for (let i = 0; i < 20; i++) { await new Promise(r => setTimeout(r, 1500)); const u = await api("update", {}); if (u.available) { showUpdate(u); e.target.textContent = "Hay versión nueva"; return; } }
         e.target.textContent = "Está al día";
       } }, "Buscar actualizaciones")),
-      row("Ver mis clips desde el móvil", "Por la Wi-Fi de casa, con código QR", toggle("acceso_movil")),
+      row("Ver mis clips desde el móvil", "Por la Wi-Fi de casa, con código QR", h("label", { class: "sw" }, h("input", { type: "checkbox", checked: c.acceso_movil ? "" : false, onchange: e => { set("acceso_movil", e.target.checked); setTimeout(drawMobile, 1800); } }), h("span"))),
+      h("div", { id: "mobilebox" }),
       row("Sonido al empezar y guardar", null, toggle("sonido")),
       row("Avisos en pantalla", null, toggle("notificaciones")),
       h("p", {}, "ClipLite " + cfgData.version)));
+  drawMobile();
+}
+
+async function drawMobile() {
+  const box = $("#mobilebox");
+  if (!box) return;
+  box.innerHTML = "";
+  let m;
+  try { m = await api("mobile", {}); } catch (e) { return; }
+  if (!m.enabled) return;
+  if (!m.url) { box.append(h("p", {}, "No se detectó la red Wi-Fi o por cable de este PC. Conéctalo a la misma red que el móvil.")); return; }
+  const qr = h("div", { class: "qr" }); qr.innerHTML = m.qr;
+  box.append(h("div", { class: "qrbox" }, qr, h("div", { style: "flex:1;min-width:200px" },
+    h("p", { style: "margin-top:0" }, h("b", {}, "Escanéalo con la cámara del móvil"), h("br"), "El móvil debe estar en la misma Wi-Fi que este PC. Si Windows pregunta, permite el acceso de ClipLite a redes privadas."),
+    h("code", {}, m.url),
+    h("div", { class: "edrow", style: "margin-top:10px" },
+      h("button", { class: "chip", onclick: async () => { if (!confirm("¿Cambiar el código? Los móviles conectados tendrán que escanearlo de nuevo.")) return; await api("mobile_reset", {}); drawMobile(); } }, "Cambiar código")))));
 }
 
 // ============================================================= EDITOR
@@ -1037,7 +1106,7 @@ function renderEditor(main) {
   left.append(h("div", { class: "edstage" }, frame, h("div", { class: "toast", id: "toast" })));
 
   if (!proj.segments.length) {
-    frame.append(h("div", { class: "edempty" }, h("div", {}, h("b", {}, "Proyecto vacío"), h("br"), "Añade clips o trozos de una partida desde la derecha, o pulsa “✂ Editar” mientras ves un vídeo.")));
+    frame.append(h("div", { class: "edempty" }, h("div", {}, h("b", {}, "Proyecto vacío"), h("br"), "Añade clips o trozos de una partida desde “Añadir trozos”, o pulsa “✂ Editar” mientras ves un vídeo.")));
   }
 
   // transporte

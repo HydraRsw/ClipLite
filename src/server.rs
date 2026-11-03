@@ -24,7 +24,14 @@ struct Srv {
     root: Mutex<PathBuf>,
     ffmpeg: PathBuf,
     tx: Mutex<std::sync::mpsc::Sender<crate::controller::Cmd>>,
+    /// Acceso desde el móvil (red local): clave propia, puerto y si está activado.
+    mobile_token: Mutex<String>,
+    mobile_on: std::sync::atomic::AtomicBool,
+    mobile_port: Mutex<Option<u16>>,
 }
+
+/// Lo que el móvil no puede hacer: cambiar la configuración, tocar el PC o actualizar.
+const MOBILE_FORBIDDEN: [&str; 7] = ["config", "pick_folder", "reveal", "update_install", "update_check", "mobile", "mobile_reset"];
 
 static SRV: OnceLock<Srv> = OnceLock::new();
 
@@ -41,7 +48,11 @@ fn random_hex() -> String {
 /// Clave de acceso: se guarda para que la ventana abierta siga funcionando tras reiniciar o
 /// actualizar ClipLite. Se puede regenerar borrando el archivo.
 fn load_token() -> String {
-    let path = crate::platform::config_dir().join("clave.txt");
+    load_token_file("clave.txt")
+}
+
+fn load_token_file(name: &str) -> String {
+    let path = crate::platform::config_dir().join(name);
     if let Ok(t) = std::fs::read_to_string(&path) {
         let t = t.trim().to_string();
         if t.len() >= 32 && t.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -59,13 +70,22 @@ pub fn start(root: PathBuf, ffmpeg: PathBuf, tx: std::sync::mpsc::Sender<crate::
     for port in 47380..47400u16 {
         let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) else { continue };
         let _ = std::fs::remove_dir_all(root.join(".cliplite").join("tmp"));
-        let _ = SRV.set(Srv { port, token: load_token(), root: Mutex::new(root), ffmpeg, tx: Mutex::new(tx) });
+        let _ = SRV.set(Srv {
+            port,
+            token: load_token(),
+            root: Mutex::new(root),
+            ffmpeg,
+            tx: Mutex::new(tx),
+            mobile_token: Mutex::new(load_token_file("clave_movil.txt")),
+            mobile_on: std::sync::atomic::AtomicBool::new(false),
+            mobile_port: Mutex::new(None),
+        });
         std::thread::Builder::new()
             .name("servidor".into())
             .spawn(move || {
                 for stream in listener.incoming().flatten() {
                     std::thread::spawn(move || {
-                        let _ = handle(stream);
+                        let _ = handle(stream, false);
                     });
                 }
             })
@@ -75,6 +95,72 @@ pub fn start(root: PathBuf, ffmpeg: PathBuf, tx: std::sync::mpsc::Sender<crate::
     }
     log!("No se pudo abrir el servidor del reproductor (puertos ocupados)");
 }
+
+/// Activa o desactiva el acceso desde el móvil. El puerto de la red local (47381) se abre la
+/// primera vez que se activa; si se desactiva, rechaza todas las conexiones.
+pub fn set_mobile(on: bool) {
+    let Some(srv) = SRV.get() else { return };
+    srv.mobile_on.store(on, std::sync::atomic::Ordering::SeqCst);
+    if !on || srv.mobile_port.lock().unwrap().is_some() {
+        return;
+    }
+    for port in 47381..47391u16 {
+        if port == srv.port {
+            continue;
+        }
+        let Ok(listener) = TcpListener::bind(("0.0.0.0", port)) else { continue };
+        *srv.mobile_port.lock().unwrap() = Some(port);
+        std::thread::Builder::new()
+            .name("movil".into())
+            .spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    if !SRV.get().map_or(false, |s| s.mobile_on.load(std::sync::atomic::Ordering::SeqCst)) {
+                        continue; // desactivado: se cierra la conexión
+                    }
+                    std::thread::spawn(move || {
+                        let _ = handle(stream, true);
+                    });
+                }
+            })
+            .ok();
+        log!("Acceso desde el móvil activado en el puerto {port}");
+        return;
+    }
+    log!("No se pudo abrir el puerto para el móvil");
+}
+
+/// IP de este PC en la red local (la que usaría para salir a internet; no envía nada).
+pub fn lan_ip() -> Option<std::net::IpAddr> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("8.8.8.8:80").ok()?;
+    let ip = s.local_addr().ok()?.ip();
+    (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
+}
+
+fn mobile_info(srv: &Srv) -> Json {
+    let on = srv.mobile_on.load(std::sync::atomic::Ordering::SeqCst);
+    let port = *srv.mobile_port.lock().unwrap();
+    let ip = lan_ip();
+    let url = match (on, ip, port) {
+        (true, Some(ip), Some(port)) => Some(format!("http://{ip}:{port}/m?k={}", srv.mobile_token.lock().unwrap())),
+        _ => None,
+    };
+    Json::Obj(vec![
+        ("enabled".into(), Json::Bool(on)),
+        ("ip".into(), ip.map(|i| Json::str(&i.to_string())).unwrap_or(Json::Null)),
+        ("url".into(), url.as_ref().map(|u| Json::str(u)).unwrap_or(Json::Null)),
+        ("qr".into(), url.and_then(|u| crate::qr::svg(&u)).map(|q| Json::str(&q)).unwrap_or(Json::Null)),
+    ])
+}
+
+fn cookie(header: &str, name: &str) -> Option<String> {
+    header.split(';').find_map(|kv| {
+        let (k, v) = kv.trim().split_once('=')?;
+        (k == name).then(|| v.to_string())
+    })
+}
+
+const MOBILE_DENIED: &str = "<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>ClipLite</title><body style='font:17px system-ui;background:#0f1014;color:#e8e9ee;display:grid;place-items:center;min-height:90vh;text-align:center;padding:20px'><div><h2>ClipLite</h2><p>Para ver tus clips, escanea el código QR que aparece en el PC:<br><b>Configuración › Ver mis clips desde el móvil</b>.</p></div></body></html>";
 
 pub fn set_root(root: PathBuf) {
     if let Some(s) = SRV.get() {
@@ -137,7 +223,7 @@ fn error(s: &mut TcpStream, msg: &str) -> std::io::Result<()> {
     json(s, Json::Obj(vec![("error".into(), Json::str(msg))]))
 }
 
-fn handle(mut stream: TcpStream) -> std::io::Result<()> {
+fn handle(mut stream: TcpStream, lan: bool) -> std::io::Result<()> {
     let srv = SRV.get().expect("servidor");
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -145,7 +231,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
     reader.read_line(&mut line)?;
     let mut parts = line.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
-    let (mut host, mut range) = (String::new(), None::<String>);
+    let (mut host, mut range, mut cookies) = (String::new(), None::<String>, String::new());
     let mut content_len: usize = 0;
     let mut total = 0;
     loop {
@@ -162,15 +248,40 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
                 "host" => host = v.trim().to_string(),
                 "range" => range = Some(v.trim().to_string()),
                 "content-length" => content_len = v.trim().parse().unwrap_or(0),
+                "cookie" => cookies = v.trim().to_string(),
                 _ => {}
             }
         }
     }
-    let ok_hosts = [format!("127.0.0.1:{}", srv.port), format!("localhost:{}", srv.port)];
-    if !ok_hosts.contains(&host) {
-        return respond(&mut stream, "403 Forbidden", "text/plain", b"");
-    }
     let (path, q) = target.split_once('?').unwrap_or((target, ""));
+    // Clave válida para esta conexión: la del PC (solo 127.0.0.1) o la del móvil (red local).
+    let token = if lan { srv.mobile_token.lock().unwrap().clone() } else { srv.token.clone() };
+    if lan {
+        // Emparejar: la dirección del código QR deja una cookie y abre el reproductor.
+        if path == "/m" {
+            if query(q, "k").as_deref() != Some(token.as_str()) {
+                return respond(&mut stream, "403 Forbidden", "text/html; charset=utf-8", MOBILE_DENIED.as_bytes());
+            }
+            log!("Móvil conectado desde {}", stream.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default());
+            write!(
+                stream,
+                "HTTP/1.1 302 Found\r\nLocation: /?t={token}\r\nSet-Cookie: clk={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )?;
+            return Ok(());
+        }
+        let authorized = cookie(&cookies, "clk").as_deref() == Some(token.as_str()) || query(q, "t").as_deref() == Some(token.as_str());
+        if !authorized {
+            return respond(&mut stream, "403 Forbidden", "text/html; charset=utf-8", MOBILE_DENIED.as_bytes());
+        }
+        if path.strip_prefix("/api/").map_or(false, |a| MOBILE_FORBIDDEN.contains(&a)) {
+            return respond(&mut stream, "403 Forbidden", "text/plain", b"");
+        }
+    } else {
+        let ok_hosts = [format!("127.0.0.1:{}", srv.port), format!("localhost:{}", srv.port)];
+        if !ok_hosts.contains(&host) {
+            return respond(&mut stream, "403 Forbidden", "text/plain", b"");
+        }
+    }
     let mut body = Vec::new();
     if method == "POST" && (path == "/api/edit" || path == "/api/config") {
         if content_len > 1_000_000 {
@@ -189,7 +300,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
         return respond(&mut stream, "200 OK", "text/html; charset=utf-8", &body);
     }
     if let Some(api) = path.strip_prefix("/api/") {
-        if query(q, "t").as_deref() != Some(srv.token.as_str()) {
+        if query(q, "t").as_deref() != Some(token.as_str()) {
             return respond(&mut stream, "403 Forbidden", "text/plain", b"");
         }
         let rel = query(q, "file").unwrap_or_default();
@@ -203,6 +314,15 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
         // Acciones que no necesitan un archivo existente.
         match api {
             "edit" => return edit_start(&mut stream, srv, &root, &body),
+            "mobile" => return json(&mut stream, mobile_info(srv)),
+            "mobile_reset" => {
+                // Nueva clave: los móviles emparejados tendrán que escanear el código otra vez.
+                let t = random_hex();
+                let _ = std::fs::write(crate::platform::config_dir().join("clave_movil.txt"), &t);
+                *srv.mobile_token.lock().unwrap() = t;
+                log!("Clave del móvil cambiada");
+                return json(&mut stream, mobile_info(srv));
+            }
             "update" => {
                 let r = crate::update::ready();
                 return json(

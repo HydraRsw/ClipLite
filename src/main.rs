@@ -18,6 +18,7 @@ mod events;
 mod json;
 mod library;
 mod platform;
+mod qr;
 mod recorder;
 mod server;
 mod update;
