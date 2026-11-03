@@ -122,6 +122,33 @@ video#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;back
 .row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border:0}
 .panel p{color:var(--dim);font-size:13px;margin:8px 0}
+/* ajustes */
+.cfg{grid-template-columns:repeat(auto-fill,minmax(420px,1fr))}
+.cfgrow{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line)}
+.cfgrow:last-of-type{border:0}
+.cfgrow.col{flex-direction:column;align-items:stretch}
+.cfgrow.col .cfglist{max-width:none;justify-content:flex-start}
+.cfgrow .cl{font-size:14px}
+.cfgrow .ch{font-size:12px;color:var(--faint);margin-top:2px}
+.cfgrow select{width:auto;min-width:150px}
+.cfgnum input{width:80px;text-align:right}
+.cfgnum{white-space:nowrap;color:var(--dim);font-size:13px}
+.cfgfolder{display:flex;gap:6px;min-width:0;flex:1;max-width:60%}
+.cfgfolder input{flex:1;min-width:0;font-size:12px}
+.cfglist{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:62%}
+.tag{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 4px 3px 10px;font-size:12px}
+.tag button{color:var(--faint);font-size:14px;width:18px;height:18px;border-radius:50%;line-height:1}
+.tag button:hover{color:#fff;background:var(--accent)}
+.tagadd{display:inline-flex;gap:4px}.tagadd input{width:150px;font-size:12px;padding:4px 8px}.tagadd .chip{padding:4px 9px}
+.hk{width:150px;text-align:center;cursor:pointer;font-weight:600}
+.hk:focus{border-color:var(--accent)}
+.sw{position:relative;display:inline-block;width:40px;height:22px;flex:none}
+.sw input{opacity:0;width:0;height:0}
+.sw span{position:absolute;inset:0;background:var(--panel2);border:1px solid var(--line);border-radius:999px;transition:.15s;cursor:pointer}
+.sw span::after{content:"";position:absolute;left:3px;top:2px;width:16px;height:16px;border-radius:50%;background:var(--dim);transition:.15s}
+.sw input:checked+span{background:var(--accent);border-color:var(--accent)}
+.sw input:checked+span::after{left:20px;background:#fff}
+#cfgstate{font-size:13px}
 /* editor */
 .edname{width:320px}
 .ed{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:minmax(0,1fr);gap:0 18px;padding:0 22px 14px}
@@ -182,6 +209,7 @@ kbd{font:11px "Segoe UI";background:var(--panel2);border:1px solid var(--line);b
     <button id="navEdit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.6 7.6 20 18M8.6 16.4 20 6"/></svg><span class="tip">Editor</span></button>
     <button id="navSpace"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3H4zm0 5h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm5 3v2h6v-2z"/></svg><span class="tip">Espacio y limpieza</span></button>
     <button id="navFav"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8l2.8 5.8 6.4.9-4.6 4.5 1.1 6.3L12 17.3l-5.7 3 1.1-6.3L2.8 9.5l6.4-.9z"/></svg><span class="tip">Favoritos</span></button>
+    <button id="navCfg" style="margin-top:auto"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.5L6.5 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1l.4 2.6h4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg><span class="tip">Configuración</span></button>
   </nav>
   <div class="main" id="main"></div>
 </div>
@@ -265,7 +293,9 @@ function render() {
   $("#navFav").classList.toggle("on", st.view === "fav");
   $("#navSpace").classList.toggle("on", st.view === "space");
   $("#navEdit").classList.toggle("on", st.view === "edit");
+  $("#navCfg").classList.toggle("on", st.view === "cfg");
   if (st.view !== "edit" && edv) { edPause(); edv = null; }
+  if (st.view === "cfg") { if (video) video.pause(); return renderSettings(main); }
   if (st.view === "space") return renderSpace(main);
   if (st.view === "edit") return renderEditor(main);
 
@@ -745,8 +775,150 @@ document.addEventListener("keydown", e => {
 
 $("#navAll").onclick = () => { st.view = "all"; if (!st.sel) pickFirst(); render(); };
 $("#navEdit").onclick = () => openEditor(false);
+$("#navCfg").onclick = () => { st.view = "cfg"; render(); };
 $("#navSpace").onclick = () => { st.view = "space"; if (video) video.pause(); render(); };
 $("#navFav").onclick = () => { st.view = "fav"; if (video) video.pause(); render(); };
+
+// ============================================================= AJUSTES
+let cfgData = null, cfgTimer = null;
+
+async function renderSettings(main) {
+  main.append(h("header", {}, h("div", { class: "crumbs" }, h("span", {}, "Configuración")), h("div", { class: "grow" }),
+    h("span", { class: "note", id: "cfgstate" }), h("div", { class: "toast", id: "toast", style: "position:static;transform:none" })));
+  if (!API) {
+    main.append(h("div", { class: "empty" }, h("div", {}, h("h2", {}, "Abre ClipLite"), h("div", {}, "La configuración se abre desde el icono de ClipLite: clic derecho › Configuración…"))));
+    return;
+  }
+  const box = h("div", { class: "space cfg" }, h("p", {}, "Cargando…"));
+  main.append(box);
+  try { cfgData = await api("config", {}); } catch (e) { box.innerHTML = ""; box.append(h("p", {}, "No se pudo leer la configuración.")); return; }
+  box.innerHTML = "";
+  const c = cfgData.config;
+
+  // ---------- controles
+  const save = () => {
+    $("#cfgstate").textContent = "Guardando…";
+    clearTimeout(cfgTimer);
+    cfgTimer = setTimeout(async () => {
+      try {
+        const r = await (await fetch(`/api/config?t=${API}`, { method: "POST", body: JSON.stringify({ config: c, autostart: cfgData.autostart }) })).json();
+        if (r.error) { $("#cfgstate").textContent = "⚠ " + r.error; return; }
+        Object.assign(c, r.config);
+        $("#cfgstate").textContent = "✓ Guardado";
+      } catch (e) { $("#cfgstate").textContent = "⚠ No se pudo guardar"; }
+    }, 500);
+  };
+  const set = (k, v) => { c[k] = v; save(); };
+  const row = (label, help, ctl) => h("div", { class: "cfgrow" + (ctl.classList && ctl.classList.contains("cfglist") ? " col" : "") }, h("div", {}, h("div", { class: "cl" }, label), help ? h("div", { class: "ch" }, help) : null), ctl);
+  const toggle = k => h("label", { class: "sw" }, h("input", { type: "checkbox", checked: c[k] ? "" : false, onchange: e => set(k, e.target.checked) }), h("span"));
+  const num = (k, min, max, step, unit) => h("span", { class: "cfgnum" }, h("input", { type: "number", min, max, step: step || 1, value: c[k], onchange: e => {
+    let v = +e.target.value; if (!isFinite(v)) v = c[k]; v = Math.min(max, Math.max(min, v)); e.target.value = v; set(k, v); } }), unit ? " " + unit : "");
+  const select = (k, opts) => h("select", { onchange: e => set(k, e.target.value) }, opts.map(([v, n]) => h("option", { value: v, selected: String(c[k]) === String(v) ? "" : false }, n)));
+  const card = (title, ...rows) => h("div", { class: "panel" }, h("h3", {}, title), ...rows);
+
+  const hotkey = k => {
+    const inp = h("input", { class: "hk", readonly: "", value: c[k], title: "Haz clic y pulsa la combinación de teclas" });
+    inp.onfocus = () => { inp.value = "Pulsa las teclas…"; };
+    inp.onblur = () => { inp.value = c[k]; };
+    inp.onkeydown = e => {
+      e.preventDefault();
+      const named = { Insert: "Insert", Delete: "Delete", Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown", Pause: "Pause", ScrollLock: "ScrollLock" };
+      let key = null;
+      if (/^F\d{1,2}$/.test(e.key)) key = e.key;
+      else if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
+      else if (/^Digit\d$/.test(e.code)) key = e.code.slice(5);
+      else if (/^Numpad\d$/.test(e.code)) key = "Numpad" + e.code.slice(6);
+      else if (named[e.key]) key = named[e.key];
+      if (!key) return; // solo modificadores todavía
+      const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Win"].filter(Boolean);
+      if (!mods.length && !/^F\d/.test(key)) { inp.value = "Usa Ctrl, Alt o Shift + tecla"; return; }
+      const combo = [...mods, key].join("+");
+      const other = k === "atajo_clip" ? "atajo_grabar" : "atajo_clip";
+      if (combo.toLowerCase() === String(c[other]).toLowerCase()) { $("#cfgstate").textContent = "⚠ Ese atajo ya se usa para la otra acción"; inp.blur(); return; }
+      c[k] = combo; inp.value = c[k]; inp.blur(); save();
+    };
+    return inp;
+  };
+
+  const listEditor = (k, placeholder, suggestions) => {
+    const wrap = h("div", { class: "cfglist" });
+    const draw = () => {
+      wrap.innerHTML = "";
+      for (const item of c[k]) wrap.append(h("span", { class: "tag" }, item, h("button", { title: "Quitar", onclick: () => { c[k] = c[k].filter(x => x !== item); draw(); save(); } }, "×")));
+      const dl = "dl_" + k;
+      const inp = h("input", { placeholder, list: dl });
+      const add = () => {
+        let v = inp.value.trim(); if (!v) return;
+        if (!/\.exe$/i.test(v)) v += ".exe";
+        if (!c[k].some(x => x.toLowerCase() === v.toLowerCase())) { c[k] = [...c[k], v]; save(); }
+        draw();
+      };
+      inp.onkeydown = e => { if (e.key === "Enter") add(); };
+      wrap.append(h("span", { class: "tagadd" }, inp, h("button", { class: "chip", onclick: add }, "Añadir")),
+        h("datalist", { id: dl }, suggestions.filter(p => !c[k].includes(p)).map(p => h("option", { value: p }))));
+    };
+    draw();
+    return wrap;
+  };
+
+  const eventChecks = (k, opts) => h("div", { class: "edchips" }, opts.map(([v, n]) => {
+    const b = h("button", { class: "trk" }, h("span", { class: "box" }), n);
+    const paint = () => { const on = c[k].includes(v); b.className = "trk " + (on ? "on" : "off"); b.firstChild.textContent = on ? "✓" : ""; };
+    b.onclick = () => { c[k] = c[k].includes(v) ? c[k].filter(x => x !== v) : [...c[k], v]; paint(); save(); };
+    paint();
+    return b;
+  }));
+
+  const folder = h("div", { class: "cfgfolder" },
+    h("input", { value: c.carpeta, readonly: "", id: "cfgdir" }),
+    h("button", { class: "chip", onclick: async () => {
+      const r = await api("pick_folder", {});
+      if (r.path) { $("#cfgdir").value = r.path; set("carpeta", r.path); }
+    } }, "Cambiar…"));
+
+  const procs = cfgData.processes || [];
+  box.append(
+    card("Grabación",
+      row("Carpeta de vídeos", "Donde se guardan partidas y clips", folder),
+      row("Qué grabar", "Partida completa ocupa más disco; los momentos se guardan siempre", select("modo", [["momentos", "Solo momentos importantes"], ["completa", "Partida completa"]])),
+      row("Empezar sola al abrir un juego", null, toggle("autodetectar_juegos")),
+      row("Juegos detectados", "El .exe del juego. Elige uno abierto ahora o escríbelo", listEditor("juegos", "juego.exe", procs))),
+    card("Vídeo",
+      row("Fotogramas por segundo", null, select("fps", [[30, "30 fps"], [60, "60 fps"], [120, "120 fps"], [144, "144 fps"]])),
+      row("Calidad", "1080p: 15–25 · 1440p: 25–35 · 4K: 40–60", num("bitrate_mbps", 2, 150, 1, "Mbps")),
+      row("Formato", "H.264 se reproduce en todas partes; HEVC ocupa la mitad", select("codec", [["h264", "H.264 (compatible)"], ["hevc", "HEVC (más pequeño)"]])),
+      row("Codificador", "Automático elige la GPU; CPU puede bajar tus FPS", select("encoder", [["auto", "Automático"], ["nvenc", "NVIDIA (NVENC)"], ["amf", "AMD (AMF)"], ["qsv", "Intel (Quick Sync)"], ["cpu", "CPU"]])),
+      row("Pantalla", "0 = principal, 1 = segunda…", num("monitor", 0, 8)),
+      row("Mostrar el puntero del ratón", null, toggle("cursor")),
+      h("p", {}, "Los cambios de vídeo se aplican en la próxima grabación.")),
+    card("Audio",
+      row("Grabar el sonido del PC", null, toggle("audio")),
+      row("Pistas separadas por aplicación", "Para silenciar Discord, música… después", toggle("pistas_por_aplicacion")),
+      row("Apps con pista propia", null, listEditor("apps_con_pista_propia", "app.exe", procs)),
+      row("Grabar mi micrófono", "En su propia pista", toggle("microfono")),
+      row("Ajuste de sincronía", "Solo si notas el audio adelantado o atrasado", num("desfase_audio_ms", -2000, 2000, 10, "ms"))),
+    card("Clips",
+      row("Segundos antes del momento", null, num("segundos_antes", 1, 120, 1, "s")),
+      row("Segundos después", null, num("segundos_despues", 0, 60, 1, "s")),
+      row("Duración del clip manual", null, num("segundos_clip_manual", 5, 300, 1, "s")),
+      row("En partida completa, guardar también clips", null, toggle("clips_en_modo_completa")),
+      row("League of Legends", null, eventChecks("eventos_lol", [["kills", "Kills"], ["multikills", "Multikills"], ["objetivos", "Objetivos"], ["asistencias", "Asistencias"], ["muertes", "Muertes"]])),
+      row("Counter-Strike 2", null, eventChecks("eventos_cs2", [["kills", "Kills"], ["muertes", "Muertes"]]))),
+    card("Atajos de teclado",
+      row("Guardar clip", "Haz clic y pulsa la combinación", hotkey("atajo_clip")),
+      row("Empezar / parar grabación", null, hotkey("atajo_grabar"))),
+    card("Limpieza",
+      row("Borrar vídeos de más de", "Los favoritos nunca se borran", select("borrar_videos_de_mas_de_dias", [[0, "Nunca"], [7, "7 días"], [14, "14 días"], [30, "30 días"], [60, "60 días"], [90, "90 días"]])),
+      row("Límite de espacio", "0 = sin límite; borra lo más antiguo", num("limite_espacio_gb", 0, 10000, 1, "GB"))),
+    card("General",
+      row("Iniciar ClipLite con Windows", null, h("label", { class: "sw" }, h("input", { type: "checkbox", checked: cfgData.autostart ? "" : false, onchange: e => { cfgData.autostart = e.target.checked; save(); } }), h("span"))),
+      row("Abrir el reproductor al terminar la partida", null, toggle("abrir_reproductor")),
+      row("Actualizarse automáticamente", "Te avisa cuando hay versión nueva", toggle("actualizaciones_automaticas")),
+      row("Ver mis clips desde el móvil", "Por la Wi-Fi de casa, con código QR", toggle("acceso_movil")),
+      row("Sonido al empezar y guardar", null, toggle("sonido")),
+      row("Avisos en pantalla", null, toggle("notificaciones")),
+      h("p", {}, "ClipLite " + cfgData.version)));
+}
 
 // ============================================================= EDITOR
 // Proyecto: lista de trozos (archivo + inicio/fin + velocidad + texto) y ajustes de salida.
@@ -1188,6 +1360,7 @@ saveFavs();
 // sesión pedida en la URL (#s=...) o la más reciente; vista (#v=espacio)
 if (/v=espacio/.test(location.hash)) st.view = "space";
 if (/v=editor/.test(location.hash)) st.view = "edit";
+if (/v=ajustes/.test(location.hash)) st.view = "cfg";
 const want = decodeURIComponent((location.hash.match(/s=([^&]+)/) || [])[1] || "");
 st.sel = sessions.find(s => s.id === want) || sessions[0] || null;
 render();

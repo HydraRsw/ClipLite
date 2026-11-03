@@ -26,7 +26,7 @@ pub fn probe_input(cfg: &Config) -> Vec<String> {
     vec!["-f".into(), "lavfi".into(), "-i".into(), format!("ddagrab=output_idx={}:framerate=10", cfg.monitor)]
 }
 #[cfg(windows)]
-pub use crate::win::{boost_audio_thread, trash, config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
+pub use crate::win::{autostart_enabled, boost_audio_thread, config_changed, pick_folder_dialog, process_names, set_autostart, trash, config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
 
 // ---------------------------------------------------------------- Pruebas (Linux/macOS)
 #[cfg(not(windows))]
@@ -76,6 +76,28 @@ pub fn boost_ffmpeg(child: &std::process::Child) {
 }
 #[cfg(not(windows))]
 pub fn boost_audio_thread() {}
+#[cfg(not(windows))]
+static FAKE_AUTOSTART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(not(windows))]
+pub fn autostart_enabled() -> bool {
+    FAKE_AUTOSTART.load(std::sync::atomic::Ordering::SeqCst)
+}
+#[cfg(not(windows))]
+pub fn set_autostart(on: bool) {
+    FAKE_AUTOSTART.store(on, std::sync::atomic::Ordering::SeqCst)
+}
+#[cfg(not(windows))]
+pub fn config_changed() {
+    log!("Configuración cambiada desde la ventana de ajustes");
+}
+#[cfg(not(windows))]
+pub fn pick_folder_dialog() -> Option<PathBuf> {
+    std::env::var_os("CLIPLITE_PICK").map(PathBuf::from)
+}
+#[cfg(not(windows))]
+pub fn process_names() -> Vec<String> {
+    vec!["Discord.exe".into(), "League of Legends.exe".into(), "explorer.exe".into()]
+}
 #[cfg(not(windows))]
 pub fn trash(p: &Path) -> Result<(), String> {
     std::fs::remove_file(p).map_err(|e| e.to_string())

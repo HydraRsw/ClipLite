@@ -19,6 +19,7 @@ pub enum Cmd {
     SetFolder(PathBuf),
     Reload,
     OpenLibrary,
+    OpenSettings,
     SetCleanDays(u32),
     Notice(String),
     Quit,
@@ -192,6 +193,10 @@ impl Controller {
                     self.encoder = recorder::probe_encoder(&self.ffmpeg, &self.cfg);
                 }
                 self.notice("Configuración recargada");
+            }
+            Cmd::OpenSettings => {
+                let url = crate::library::player_url(&self.cfg.output_dir, None);
+                crate::platform::open_url(&format!("{}#v=ajustes", url.split('#').next().unwrap_or(&url)));
             }
             Cmd::OpenLibrary => {
                 crate::platform::open_url(&crate::library::player_url(&self.cfg.output_dir, None));

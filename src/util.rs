@@ -43,6 +43,13 @@ pub fn civil_from_unix(secs: i64) -> (u32, u32, u32, u32, u32, u32) {
     )
 }
 
+/// Versión de este ejecutable. GitHub Actions la fija al compilar (1.0.<número de compilación>);
+/// una compilación local se marca como "local".
+pub const VERSION: &str = match option_env!("CLIPLITE_VERSION") {
+    Some(v) => v,
+    None => concat!(env!("CARGO_PKG_VERSION"), "-local"),
+};
+
 /// Días desde 1970-01-01 de una fecha civil (algoritmo de Howard Hinnant).
 pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };

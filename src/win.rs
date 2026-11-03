@@ -119,6 +119,7 @@ extern "system" {
     fn TrackPopupMenu(m: H, flags: u32, x: i32, y: i32, reserved: i32, h: H, rect: *const c_void) -> BOOL;
     fn DestroyMenu(m: H) -> BOOL;
     fn GetCursorPos(p: *mut POINT) -> BOOL;
+    fn GetForegroundWindow() -> H;
     fn SetForegroundWindow(h: H) -> BOOL;
     fn CreateIcon(inst: H, w: i32, h: i32, planes: u8, bpp: u8, and: *const u8, xor: *const u8) -> H;
     fn MessageBoxW(h: H, text: *const u16, caption: *const u16, t: u32) -> i32;
@@ -201,6 +202,7 @@ const WM_LBUTTONUP: u32 = 0x0202;
 const WM_RBUTTONUP: u32 = 0x0205;
 const WM_TRAY: u32 = 0x8001;
 const WM_UPDATE: u32 = 0x8002;
+const WM_RELOADCFG: u32 = 0x8003;
 
 const NIM_ADD: u32 = 0;
 const NIM_MODIFY: u32 = 1;
@@ -400,11 +402,11 @@ pub fn reveal(p: &Path) {
     let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{path}")).spawn();
 }
 
-fn autostart_enabled() -> bool {
+pub fn autostart_enabled() -> bool {
     reg_get_str(HKCU, RUN_KEY, "ClipLite").is_some()
 }
 
-fn set_autostart(on: bool) {
+pub fn set_autostart(on: bool) {
     unsafe {
         if on {
             let exe = std::env::current_exe().unwrap_or_default();
@@ -1016,6 +1018,46 @@ unsafe fn register_hotkeys(hwnd: H, cfg: &Config) -> Vec<String> {
     failed
 }
 
+/// Vuelve a leer la configuración: juegos, atajos y todo lo demás (lo usa el menú y la ventana de ajustes).
+unsafe fn reload_config(hwnd: H) {
+    let cfg = Config::load_or_create(&ctx().cfg_path);
+    *GAMES.lock().unwrap() = cfg.games.clone();
+    let failed = register_hotkeys(hwnd, &cfg);
+    {
+        let mut vv = ctx().view.lock().unwrap();
+        vv.hk_clip = cfg.hotkey_clip.clone();
+        vv.hk_rec = cfg.hotkey_record.clone();
+    }
+    if !failed.is_empty() {
+        tray(NIM_MODIFY, Some(&format!("No se pudo usar el atajo {} (¿lo usa otro programa?)", failed.join(", "))));
+    }
+    send(Cmd::Reload);
+}
+
+/// La ventana de ajustes guardó cambios: aplicarlos (en el hilo de la interfaz).
+pub fn config_changed() {
+    if let Some(c) = CTX.get() {
+        unsafe { PostMessageW(c.hwnd.load(Ordering::SeqCst), WM_RELOADCFG, 0, 0) };
+    }
+}
+
+/// Selector de carpeta, encima de la ventana que esté delante (la de ajustes).
+pub fn pick_folder_dialog() -> Option<PathBuf> {
+    unsafe {
+        CoInitializeEx(null(), 0x2 /* STA */);
+        let owner = GetForegroundWindow();
+        pick_folder(owner)
+    }
+}
+
+/// Nombres de los programas abiertos ahora (para elegir juegos o apps con pista propia).
+pub fn process_names() -> Vec<String> {
+    let mut v: Vec<String> = process_list().into_iter().map(|p| p.2).filter(|n| n.ends_with(".exe")).collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
 unsafe fn show_menu(hwnd: H) {
     let v = ctx().view.lock().unwrap().clone();
     let m = CreatePopupMenu();
@@ -1035,7 +1077,7 @@ unsafe fn show_menu(hwnd: H) {
     add(MF_SEPARATOR, 0, "");
     add(0, ID_FOLDER, "Cambiar carpeta de guardado…");
     add(0, ID_OPEN, "Abrir carpeta de clips");
-    add(0, ID_EDIT, "Editar configuración");
+    add(0, ID_EDIT, "Configuración…");
     add(0, ID_RELOAD, "Recargar configuración");
     add(0, ID_LOG, "Ver registro");
     let sub = CreatePopupMenu();
@@ -1076,22 +1118,9 @@ unsafe fn show_menu(hwnd: H) {
             let _ = std::fs::create_dir_all(&v.folder);
             open(&v.folder.to_string_lossy(), None);
         }
-        ID_EDIT => open("notepad.exe", Some(&format!("\"{}\"", ctx().cfg_path.display()))),
+        ID_EDIT => send(Cmd::OpenSettings),
         ID_LOG => open("notepad.exe", Some(&format!("\"{}\"", ctx().log_path.display()))),
-        ID_RELOAD => {
-            let cfg = Config::load_or_create(&ctx().cfg_path);
-            *GAMES.lock().unwrap() = cfg.games.clone();
-            let failed = register_hotkeys(hwnd, &cfg);
-            {
-                let mut vv = ctx().view.lock().unwrap();
-                vv.hk_clip = cfg.hotkey_clip.clone();
-                vv.hk_rec = cfg.hotkey_record.clone();
-            }
-            if !failed.is_empty() {
-                tray(NIM_MODIFY, Some(&format!("No se pudo usar el atajo {} (¿lo usa otro programa?)", failed.join(", "))));
-            }
-            send(Cmd::Reload);
-        }
+        ID_RELOAD => reload_config(hwnd),
         ID_AUTOSTART => set_autostart(!autostart_enabled()),
         x if (ID_CLEAN..ID_CLEAN + CLEAN_OPTIONS.len()).contains(&x) => send(Cmd::SetCleanDays(CLEAN_OPTIONS[x - ID_CLEAN].0)),
         ID_QUIT => send(Cmd::Quit),
@@ -1118,6 +1147,10 @@ unsafe extern "system" fn wndproc(hwnd: H, msg: u32, wparam: usize, lparam: isiz
                 2 => send(Cmd::ToggleRecord),
                 _ => {}
             }
+            0
+        }
+        WM_RELOADCFG => {
+            reload_config(hwnd);
             0
         }
         WM_UPDATE => {

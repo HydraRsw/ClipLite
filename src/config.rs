@@ -49,6 +49,8 @@ pub struct Config {
     pub mic: bool,
     pub clean_days: u32,
     pub limit_gb: f64,
+    pub auto_update: bool,
+    pub mobile: bool,
     pub ffmpeg: String,
 }
 
@@ -102,6 +104,8 @@ impl Default for Config {
             mic: false,
             clean_days: 0,
             limit_gb: 0.0,
+            auto_update: true,
+            mobile: false,
             ffmpeg: String::new(),
         }
     }
@@ -178,6 +182,8 @@ impl Config {
                 "microfono" | "micrófono" => self.mic = parse_bool(v).unwrap_or(self.mic),
                 "borrar_videos_de_mas_de_dias" => self.clean_days = v.parse().unwrap_or(self.clean_days),
                 "limite_espacio_gb" => self.limit_gb = v.replace(',', ".").parse().unwrap_or(self.limit_gb),
+                "actualizaciones_automaticas" => self.auto_update = parse_bool(v).unwrap_or(self.auto_update),
+                "acceso_movil" | "acceso_móvil" => self.mobile = parse_bool(v).unwrap_or(self.mobile),
                 "abrir_reproductor" => self.open_player = parse_bool(v).unwrap_or(self.open_player),
                 "ffmpeg" => self.ffmpeg = v.to_string(),
                 _ => {}
@@ -189,7 +195,8 @@ impl Config {
         let b = |x: bool| if x { "si" } else { "no" };
         let text = format!(
             "# ClipLite - configuración
-# Tras editar, haz clic derecho en el icono de la bandeja > \"Recargar configuración\".
+# Lo más cómodo: clic derecho en el icono de ClipLite > \"Configuración...\".
+# Si editas este archivo a mano, después usa \"Recargar configuración\" en ese mismo menú.
 
 # Carpeta donde se guardan los clips y las partidas
 carpeta = {carpeta}
@@ -260,6 +267,12 @@ borrar_videos_de_mas_de_dias = {clean}
 # Si los vídeos ocupan más de estos GB, borrar empezando por los más antiguos (0 = sin límite)
 limite_espacio_gb = {limit}
 
+# ---------------- Actualizaciones y móvil ----------------
+# Buscar e instalar actualizaciones de ClipLite automáticamente
+actualizaciones_automaticas = {autoup}
+# Permitir ver los clips desde el móvil por la Wi-Fi de casa (se empareja con un código QR)
+acceso_movil = {mobile}
+
 # ---------------- Otros ----------------
 sonido = {sonido}
 notificaciones = {notif}
@@ -295,9 +308,75 @@ ffmpeg = {ffmpeg}
             mic = b(self.mic),
             clean = self.clean_days,
             limit = self.limit_gb,
+            autoup = b(self.auto_update),
+            mobile = b(self.mobile),
             ffmpeg = self.ffmpeg,
         );
         std::fs::write(path, text)
+    }
+}
+
+impl Config {
+    /// Todos los ajustes como JSON, con las mismas claves que el archivo .ini.
+    pub fn to_json(&self) -> crate::json::Json {
+        use crate::json::Json;
+        let st = |s: &str| Json::str(s);
+        let list = |v: &[String]| Json::Arr(v.iter().map(|x| Json::str(x)).collect());
+        let n = |x: f64| Json::Num(x);
+        Json::Obj(vec![
+            ("carpeta".into(), st(&self.output_dir.to_string_lossy())),
+            ("modo".into(), st(self.mode.as_str())),
+            ("monitor".into(), n(self.monitor as f64)),
+            ("fps".into(), n(self.fps as f64)),
+            ("bitrate_mbps".into(), n(self.bitrate_mbps as f64)),
+            ("codec".into(), st(&self.codec)),
+            ("encoder".into(), st(&self.encoder)),
+            ("cursor".into(), Json::Bool(self.cursor)),
+            ("audio".into(), Json::Bool(self.audio)),
+            ("desfase_audio_ms".into(), n(self.audio_offset_ms as f64)),
+            ("pistas_por_aplicacion".into(), Json::Bool(self.app_tracks)),
+            ("apps_con_pista_propia".into(), list(&self.track_apps)),
+            ("microfono".into(), Json::Bool(self.mic)),
+            ("segundos_antes".into(), n(self.pre as f64)),
+            ("segundos_despues".into(), n(self.post as f64)),
+            ("segundos_clip_manual".into(), n(self.manual_secs as f64)),
+            ("clips_en_modo_completa".into(), Json::Bool(self.clips_in_full)),
+            ("atajo_clip".into(), st(&self.hotkey_clip)),
+            ("atajo_grabar".into(), st(&self.hotkey_record)),
+            ("autodetectar_juegos".into(), Json::Bool(self.autodetect)),
+            ("juegos".into(), list(&self.games)),
+            ("eventos_lol".into(), list(&self.lol_events)),
+            ("eventos_cs2".into(), list(&self.cs2_events)),
+            ("abrir_reproductor".into(), Json::Bool(self.open_player)),
+            ("borrar_videos_de_mas_de_dias".into(), n(self.clean_days as f64)),
+            ("limite_espacio_gb".into(), n(self.limit_gb)),
+            ("actualizaciones_automaticas".into(), Json::Bool(self.auto_update)),
+            ("acceso_movil".into(), Json::Bool(self.mobile)),
+            ("sonido".into(), Json::Bool(self.sound)),
+            ("notificaciones".into(), Json::Bool(self.notifications)),
+        ])
+    }
+
+    /// Aplica ajustes recibidos como JSON (mismas claves que el .ini). Pasa por la misma
+    /// validación que el archivo, así que un valor fuera de rango se corrige o se ignora.
+    pub fn apply_json(&mut self, j: &crate::json::Json) {
+        use crate::json::Json;
+        let Json::Obj(fields) = j else { return };
+        let clean = |s: &str| s.replace(['\n', '\r'], " ");
+        for (k, v) in fields {
+            let val = match v {
+                Json::Bool(b) => (if *b { "si" } else { "no" }).to_string(),
+                Json::Num(x) if x.fract() == 0.0 => format!("{}", *x as i64),
+                Json::Num(x) => format!("{x}"),
+                Json::Str(s) => clean(s),
+                Json::Arr(a) => a.iter().filter_map(|x| x.as_str()).map(|x| clean(x).replace(',', " ")).collect::<Vec<_>>().join(", "),
+                _ => continue,
+            };
+            if k == "carpeta" && val.trim().is_empty() {
+                continue;
+            }
+            self.apply(&format!("{} = {}", clean(k), val));
+        }
     }
 }
 
@@ -322,6 +401,18 @@ mod tests {
         assert_eq!(c2.output_dir, PathBuf::from(r"D:\Mis Clips"));
         assert_eq!(c2.games, vec!["a.exe", "b c.exe"]);
         assert_eq!(c2.hotkey_clip, "Ctrl+F10");
+        // JSON: ida y vuelta, y valores fuera de rango corregidos.
+        let mut c3 = Config::default();
+        c3.apply_json(&c2.to_json());
+        assert_eq!(c3.games, c2.games);
+        assert_eq!(c3.output_dir, c2.output_dir);
+        let j = crate::json::parse(r#"{"fps":999,"modo":"completa","juegos":["x.exe","y z.exe"],"microfono":true,"carpeta":"","atajo_clip":"Alt+F2\nmodo = momentos"}"#).unwrap();
+        c3.apply_json(&j);
+        assert_eq!(c3.fps, 240);
+        assert_eq!(c3.mode, Mode::Completa, "no se pueden colar claves con saltos de línea");
+        assert_eq!(c3.games, vec!["x.exe", "y z.exe"]);
+        assert!(c3.mic);
+        assert_eq!(c3.output_dir, c2.output_dir, "carpeta vacía se ignora");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

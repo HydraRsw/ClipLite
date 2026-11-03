@@ -155,7 +155,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
     }
     let (path, q) = target.split_once('?').unwrap_or((target, ""));
     let mut body = Vec::new();
-    if method == "POST" && path == "/api/edit" {
+    if method == "POST" && (path == "/api/edit" || path == "/api/config") {
         if content_len > 1_000_000 {
             return respond(&mut stream, "413 Payload Too Large", "text/plain", b"");
         }
@@ -186,6 +186,27 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
         // Acciones que no necesitan un archivo existente.
         match api {
             "edit" => return edit_start(&mut stream, srv, &root, &body),
+            "config" if method == "POST" => return config_save(&mut stream, &body),
+            "config" => {
+                let cfg = crate::config::Config::load_or_create(&crate::config::config_path());
+                let procs = crate::platform::process_names();
+                return json(
+                    &mut stream,
+                    Json::Obj(vec![
+                        ("config".into(), cfg.to_json()),
+                        ("autostart".into(), Json::Bool(crate::platform::autostart_enabled())),
+                        ("version".into(), Json::str(util::VERSION)),
+                        ("processes".into(), Json::Arr(procs.iter().map(|p| Json::str(p)).collect())),
+                    ]),
+                );
+            }
+            "pick_folder" => {
+                let picked = crate::platform::pick_folder_dialog();
+                return json(
+                    &mut stream,
+                    Json::Obj(vec![("path".into(), picked.map(|p| Json::str(&p.to_string_lossy())).unwrap_or(Json::Null))]),
+                );
+            }
             "edit_status" => {
                 let id = query(q, "id").unwrap_or_default();
                 let j = match crate::editor::status(&id) {
@@ -299,6 +320,43 @@ fn rel_path(root: &Path, p: &Path) -> String {
     let p = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let r = p.strip_prefix(&root).unwrap_or(&p);
     r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
+}
+
+/// Guarda los ajustes de la ventana de configuración y los aplica sin reiniciar.
+fn config_save(stream: &mut TcpStream, body: &[u8]) -> std::io::Result<()> {
+    let Some(j) = crate::json::parse(&String::from_utf8_lossy(body)) else { return error(stream, "Datos inválidos") };
+    let path = crate::config::config_path();
+    let mut cfg = crate::config::Config::load_or_create(&path);
+    if let Some(c) = j.get("config") {
+        // Atajos: deben ser válidos y distintos.
+        for k in ["atajo_clip", "atajo_grabar"] {
+            if let Some(v) = c.get(k).and_then(Json::as_str) {
+                if util::parse_hotkey(v).is_none() {
+                    return error(stream, &format!("El atajo \"{v}\" no es válido"));
+                }
+            }
+        }
+        let (a, b) = (c.get("atajo_clip").and_then(Json::as_str), c.get("atajo_grabar").and_then(Json::as_str));
+        if a.is_some() && a.map(|x| x.to_lowercase()) == b.map(|x| x.to_lowercase()) {
+            return error(stream, "Los dos atajos no pueden ser iguales");
+        }
+        if let Some(dir) = c.get("carpeta").and_then(Json::as_str) {
+            if !dir.trim().is_empty() && std::fs::create_dir_all(dir.trim()).is_err() {
+                return error(stream, "No se puede usar esa carpeta");
+            }
+        }
+        cfg.apply_json(c);
+    }
+    if let Err(e) = cfg.save(&path) {
+        return error(stream, &format!("No se pudo guardar: {e}"));
+    }
+    if let Some(on) = j.get("autostart") {
+        if on.as_bool() != crate::platform::autostart_enabled() {
+            crate::platform::set_autostart(on.as_bool());
+        }
+    }
+    crate::platform::config_changed();
+    json(stream, Json::Obj(vec![("ok".into(), Json::Bool(true)), ("config".into(), cfg.to_json())]))
 }
 
 fn edit_start(stream: &mut TcpStream, srv: &Srv, root: &Path, body: &[u8]) -> std::io::Result<()> {
