@@ -152,6 +152,29 @@ Atajos del editor: `Espacio` reproducir · `I` `O` inicio y fin · `S` partir ·
   - Lo que borras a mano va a la **Papelera de reciclaje**; la limpieza automática borra definitivamente, porque si no, no liberaría espacio.
   - Solo se tocan vídeos creados por ClipLite.
 
+## App Android: grabar los juegos del móvil
+
+1. En el móvil, abre la pestaña **Releases** del repositorio y descarga `ClipLite-Android.apk` de la última versión. Ábrelo y permite "instalar apps de esta fuente".
+2. Abre ClipLite, pulsa **Empezar a grabar** y acepta los permisos (grabar pantalla y audio).
+3. Abre tu juego. Aparece un **botón rojo flotante**:
+   - **tócalo** para guardar los últimos 30 s;
+   - **mantenlo pulsado** para detener;
+   - también puedes arrastrarlo a donde no estorbe.
+4. Los clips quedan en la galería (`Movies/ClipLite`) y en la lista de la app, desde donde los ves, compartes o borras.
+
+**Cómo funciona:**
+- **Vídeo:** codificado por el chip de vídeo del móvil (H.264 por hardware).
+- **Sonido:** el interno del juego (Android 10 o superior) y, si quieres, tu micrófono.
+- **Clips:** se guardan copiando los últimos segundos que ya están en memoria, así que es instantáneo.
+- **Modo partida completa:** opcional.
+- **Tamaño:** la app ocupa menos de 100 KB y no lleva librerías externas.
+
+**Actualizaciones:** la app avisa "Hay una actualización nueva". **Actualizar ahora** la descarga, comprueba su huella SHA-256 y abre el instalador de Android, que siempre pide confirmación.
+
+**Límites:**
+- Algunos juegos bloquean la grabación de su sonido; en ese caso se graba solo la imagen.
+- iPhone no es posible: requiere un Mac y una cuenta de desarrollador de Apple.
+
 ## Ver tus clips en el móvil
 
 1. En el PC: Configuración › General › **Ver mis clips desde el móvil**. Aparece un código QR.
@@ -200,6 +223,7 @@ Si no quieres que se abra solo, pon `abrir_reproductor = no` en la configuració
 | `events.rs` | detección de momentos de LoL y CS2 |
 | `library.rs`, `player.html` | biblioteca de partidas y reproductor |
 | `server.rs` | servidor local del reproductor: vídeos, mezcla de pistas y copias |
+| `android/` | app Android (Kotlin): `Engine.kt` graba, `RecorderService.kt` botón flotante y notificación, `Updater.kt` actualizaciones |
 | `qr.rs` | generador de códigos QR (para emparejar el móvil) |
 | `update.rs` | actualizaciones automáticas: consulta, descarga, SHA-256 |
 | `editor.rs` | editor: convierte el proyecto en una orden de FFmpeg, exporta en segundo plano |
