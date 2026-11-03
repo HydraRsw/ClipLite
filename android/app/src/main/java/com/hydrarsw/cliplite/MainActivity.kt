@@ -32,7 +32,7 @@ class MainActivity : Activity() {
     private val bg = Color.parseColor("#0F1014")
     private val panel = Color.parseColor("#16171D")
     private val panel2 = Color.parseColor("#1D1F27")
-    private val text = Color.parseColor("#E8E9EE")
+    private val fg = Color.parseColor("#E8E9EE")
     private val dim = Color.parseColor("#9497A3")
     private val accent = Color.parseColor("#E5393F")
 
@@ -49,7 +49,7 @@ class MainActivity : Activity() {
         cornerRadius = dp(radius).toFloat()
     }
 
-    private fun label(s: String, size: Float = 15f, color: Int = text, bold: Boolean = false) = TextView(this).apply {
+    private fun label(s: String, size: Float = 15f, color: Int = fg, bold: Boolean = false) = TextView(this).apply {
         this.text = s
         textSize = size
         setTextColor(color)
@@ -79,7 +79,7 @@ class MainActivity : Activity() {
         for ((name, value) in options) {
             val rb = RadioButton(this).apply {
                 this.text = name
-                setTextColor(text)
+                setTextColor(fg)
                 id = View.generateViewId()
                 isChecked = value == current
                 setOnCheckedChangeListener { _, on -> if (on) Prefs.set(this@MainActivity, key, value) }
@@ -93,7 +93,7 @@ class MainActivity : Activity() {
     private fun toggle(parent: LinearLayout, title: String, on: Boolean, onChange: (Boolean) -> Unit): Switch {
         val s = Switch(this).apply {
             this.text = title
-            setTextColor(text)
+            setTextColor(fg)
             textSize = 15f
             isChecked = on
             setPadding(0, dp(8), 0, dp(8))
