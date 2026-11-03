@@ -1,0 +1,4 @@
+--------- beginning of main
+11-03 19:09:22.786  3537  3537 I ClipLite: Vídeo 1920x864 a 60 fps, 14000 kbps
+11-03 19:09:35.988  3537  5370 I ClipLite: Clip guardado: content://media/external_primary/video/media/1000000018 (12590 ms)
+11-03 19:10:05.997  3537  3537 I ClipLite: Vídeo 1920x864 a 60 fps, 14000 kbps
