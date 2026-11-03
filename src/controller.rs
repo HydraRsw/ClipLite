@@ -21,6 +21,10 @@ pub enum Cmd {
     OpenLibrary,
     OpenSettings,
     SetCleanDays(u32),
+    /// Buscar actualizaciones (true = lo pidió el usuario: avisar también si ya está al día).
+    CheckUpdates(bool),
+    UpdateReady(crate::update::Ready),
+    InstallUpdate,
     Notice(String),
     Quit,
 }
@@ -29,6 +33,8 @@ pub enum Cmd {
 pub enum UiMsg {
     State { recording: bool, game: String, mode: Mode, folder: PathBuf, encoder: String, clean_days: u32 },
     Notice(String),
+    /// Aviso de la bandeja "hay actualización" (al hacer clic, se instala).
+    UpdateReady(String),
     Exit,
 }
 
@@ -55,6 +61,9 @@ pub struct Controller {
     lol_stop: Option<Arc<AtomicBool>>,
     lol_factory: FetcherFactory,
     restarts: u32,
+    auto_update: Arc<AtomicBool>,
+    install_after_session: bool,
+    quitting: bool,
 }
 
 impl Controller {
@@ -68,6 +77,7 @@ impl Controller {
     ) -> Controller {
         let (jobs, jobs_rx) = channel();
         let worker = recorder::spawn_worker(ffmpeg.clone(), jobs_rx, tx.clone());
+        let auto = cfg.auto_update;
         Controller {
             cfg,
             cfg_path,
@@ -82,12 +92,16 @@ impl Controller {
             lol_stop: None,
             lol_factory,
             restarts: 0,
+            auto_update: Arc::new(AtomicBool::new(auto)),
+            install_after_session: false,
+            quitting: false,
         }
     }
 
     pub fn run(mut self, rx: Receiver<Cmd>) {
         let _ = std::fs::create_dir_all(&self.cfg.output_dir);
-        crate::server::start(self.cfg.output_dir.clone(), self.ffmpeg.clone());
+        crate::server::start(self.cfg.output_dir.clone(), self.ffmpeg.clone(), self.tx.clone());
+        self.spawn_update_checker();
         recorder::recover_leftovers(&self.cfg.output_dir.join(".buffer"), &self.cfg.output_dir, &self.jobs);
         self.encoder = recorder::probe_encoder(&self.ffmpeg, &self.cfg);
         if let Some(e) = &self.encoder {
@@ -110,6 +124,9 @@ impl Controller {
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             self.tick();
+            if self.quitting {
+                break;
+            }
         }
 
         self.stop_session(false);
@@ -182,11 +199,13 @@ impl Controller {
                 self.notice(&format!("Carpeta: {}{extra}", self.cfg.output_dir.display()));
             }
             Cmd::Reload => {
+                // (las actualizaciones automáticas se pueden activar o desactivar al momento)
                 let new = Config::load_or_create(&self.cfg_path);
                 let enc_changed = new.encoder != self.cfg.encoder
                     || new.codec != self.cfg.codec
                     || new.bitrate_mbps != self.cfg.bitrate_mbps
                     || new.monitor != self.cfg.monitor;
+                self.auto_update.store(new.auto_update, Ordering::SeqCst);
                 self.cfg = new;
                 crate::server::set_root(self.cfg.output_dir.clone());
                 if enc_changed {
@@ -210,6 +229,39 @@ impl Controller {
                     format!("Se borrarán solos los vídeos de más de {d} días (excepto favoritos)")
                 });
                 self.cleanup();
+            }
+            Cmd::CheckUpdates(manual) => {
+                let tx = self.tx.clone();
+                std::thread::spawn(move || match crate::update::check_and_download() {
+                    Ok(Some(r)) => {
+                        let _ = tx.send(Cmd::UpdateReady(r));
+                    }
+                    Ok(None) if manual => {
+                        let _ = tx.send(Cmd::Notice(format!("ClipLite está al día (versión {})", crate::util::VERSION)));
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        log!("Actualizaciones: {e}");
+                        if manual {
+                            let _ = tx.send(Cmd::Notice(format!("No se pudo buscar actualizaciones: {e}")));
+                        }
+                    }
+                });
+            }
+            Cmd::UpdateReady(r) => {
+                log!("Hay una actualización nueva: {}", r.version);
+                (self.notify)(UiMsg::UpdateReady(format!(
+                    "Hay una actualización nueva: ClipLite {}.\nHaz clic aquí para instalarla (o se instalará sola al volver a abrir ClipLite).",
+                    r.version
+                )));
+            }
+            Cmd::InstallUpdate => {
+                if self.session.is_some() {
+                    self.install_after_session = true;
+                    self.notice("La actualización se instalará al terminar la grabación");
+                } else {
+                    self.install_update();
+                }
             }
             Cmd::Notice(msg) => self.notice(&msg),
             Cmd::Quit => {}
@@ -292,7 +344,51 @@ impl Controller {
             s.stop(&self.jobs, open_player);
             self.cleanup();
             self.beep();
+            if self.install_after_session {
+                self.install_after_session = false;
+                self.install_update();
+            }
         }
+    }
+
+    /// Sustituye el programa por la versión descargada y cierra este (la nueva se abre sola).
+    fn install_update(&mut self) {
+        let Some(r) = crate::update::ready() else {
+            self.notice("No hay ninguna actualización descargada");
+            return;
+        };
+        match crate::platform::apply_update(&r.file) {
+            Ok(()) => {
+                log!("Cerrando para terminar la actualización a {}", r.version);
+                self.quitting = true;
+            }
+            Err(e) => {
+                crate::update::clear();
+                self.notice(&format!("No se pudo instalar la actualización: {e}"));
+            }
+        }
+    }
+
+    /// Busca actualizaciones 30 s después de abrir y luego cada 6 horas (si están activadas).
+    fn spawn_update_checker(&self) {
+        if let Some(r) = crate::update::load_pending() {
+            // Descargada en una sesión anterior pero aún sin instalar.
+            let _ = self.tx.send(Cmd::UpdateReady(r));
+        }
+        let tx = self.tx.clone();
+        let enabled = self.auto_update.clone();
+        std::thread::Builder::new()
+            .name("actualizaciones".into())
+            .spawn(move || {
+                std::thread::sleep(Duration::from_secs(30));
+                loop {
+                    if enabled.load(Ordering::SeqCst) && tx.send(Cmd::CheckUpdates(false)).is_err() {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_secs(6 * 3600));
+                }
+            })
+            .ok();
     }
 
     fn save_cfg(&self) {

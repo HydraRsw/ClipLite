@@ -26,7 +26,7 @@ pub fn probe_input(cfg: &Config) -> Vec<String> {
     vec!["-f".into(), "lavfi".into(), "-i".into(), format!("ddagrab=output_idx={}:framerate=10", cfg.monitor)]
 }
 #[cfg(windows)]
-pub use crate::win::{autostart_enabled, boost_audio_thread, config_changed, pick_folder_dialog, process_names, set_autostart, trash, config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
+pub use crate::win::{apply_update, https_download, https_get, autostart_enabled, boost_audio_thread, config_changed, pick_folder_dialog, process_names, set_autostart, trash, config_dir, default_output_dir, hide_path, install_cs2_cfg, local_time, lol_fetcher, open_source, open_url, reveal, track_specs};
 
 // ---------------------------------------------------------------- Pruebas (Linux/macOS)
 #[cfg(not(windows))]
@@ -85,6 +85,30 @@ pub fn autostart_enabled() -> bool {
 #[cfg(not(windows))]
 pub fn set_autostart(on: bool) {
     FAKE_AUTOSTART.store(on, std::sync::atomic::Ordering::SeqCst)
+}
+/// Fuera de Windows (pruebas): HTTPS con curl.
+#[cfg(not(windows))]
+pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
+    let o = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "60", "-H", "User-Agent: ClipLite", "-H", "Accept: application/vnd.github+json", url])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if o.status.success() { Ok(o.stdout) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }
+}
+#[cfg(not(windows))]
+pub fn https_download(url: &str, dest: &Path) -> Result<(), String> {
+    let st = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "300", "-H", "User-Agent: ClipLite", "-o"])
+        .arg(dest)
+        .arg(url)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if st.success() { Ok(()) } else { Err("descarga fallida".into()) }
+}
+#[cfg(not(windows))]
+pub fn apply_update(new_exe: &Path) -> Result<(), String> {
+    log!("(pruebas) se instalaría {}", new_exe.display());
+    Ok(())
 }
 #[cfg(not(windows))]
 pub fn config_changed() {

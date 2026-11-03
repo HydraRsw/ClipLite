@@ -1,16 +1,27 @@
-# Compila ClipLite.exe en los servidores de GitHub (Windows) y lo empaqueta junto con FFmpeg.
-# Sube el proyecto a un repositorio de GitHub; el zip listo aparece en la pestaña "Actions".
+# Compila ClipLite en los servidores de GitHub y publica una versión nueva (Releases).
+# La app instalada la detecta, la descarga, comprueba su huella SHA-256 y se actualiza sola.
 name: Compilar ClipLite
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Número de versión: 1.0.<número de compilación>. Va dentro del programa.
+  CLIPLITE_VERSION: 1.0.${{ github.run_number }}
 
 jobs:
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Pruebas
+        run: cargo test --release
 
       - name: Compilar
         run: cargo build --release
@@ -20,13 +31,44 @@ jobs:
         run: |
           Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
-          New-Item -ItemType Directory -Force dist | Out-Null
+          New-Item -ItemType Directory -Force dist, publicar | Out-Null
           Copy-Item target/release/ClipLite.exe dist/
           $ff = Get-ChildItem ffmpeg_tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           Copy-Item $ff.FullName dist/
           Copy-Item LEEME.md dist/
+          Compress-Archive -Path dist/* -DestinationPath publicar/ClipLite-Windows.zip
+          Copy-Item target/release/ClipLite.exe publicar/
 
       - uses: actions/upload-artifact@v4
         with:
           name: ClipLite-Windows
           path: dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: publicar-windows
+          path: publicar
+
+  publicar:
+    needs: [windows]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: publicar-*
+          path: publicar
+          merge-multiple: true
+
+      - name: Publicar versión
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MENSAJE: ${{ github.event.head_commit.message }}
+        run: |
+          # Notas: el mensaje del cambio, sin las líneas de autoría.
+          printf '%s\n' "$MENSAJE" | grep -v -E '^(Co-Authored-By|Claude-Session):' > notas.md
+          gh release create "v$CLIPLITE_VERSION" publicar/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "ClipLite $CLIPLITE_VERSION" \
+            --notes-file notas.md \
+            --latest

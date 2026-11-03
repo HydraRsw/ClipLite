@@ -8,11 +8,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub fn run() {
+    // Prueba de actualización real contra GitHub: `ClipLite actualizar-prueba`.
+    if std::env::args().any(|a| a == "actualizar-prueba") {
+        let _ = std::fs::create_dir_all(crate::platform::config_dir());
+        crate::log::init(&crate::platform::config_dir().join("log.txt"));
+        println!("versión local: {}", crate::util::VERSION);
+        match crate::update::check_and_download() {
+            Ok(Some(r)) => println!("descargada y verificada: {} → {}", r.version, r.file.display()),
+            Ok(None) => println!("al día"),
+            Err(e) => println!("error: {e}"),
+        }
+        return;
+    }
     // Modo servidor: `ClipLite servir` sirve el reproductor de CLIPLITE_OUT durante 10 minutos.
     if std::env::args().any(|a| a == "servir") {
         let out = std::path::PathBuf::from(std::env::var("CLIPLITE_OUT").unwrap_or_else(|_| "cliplite_out".into()));
         let ffmpeg = crate::util::find_ffmpeg("").expect("ffmpeg en el PATH");
-        crate::server::start(out, ffmpeg);
+        let (tx, _rx) = channel();
+        crate::server::start(out, ffmpeg, tx);
         println!("{}", crate::server::base_url().unwrap_or_default());
         std::thread::sleep(Duration::from_secs(600));
         return;
@@ -42,6 +55,7 @@ pub fn run() {
         UiMsg::Notice(s) if s.is_empty() => println!("[UI] *beep*"),
         UiMsg::Notice(s) => println!("[UI] aviso: {s}"),
         UiMsg::Exit => println!("[UI] salir"),
+        UiMsg::UpdateReady(s) => println!("[UI] actualización: {s}"),
     });
     // LoL simulado: tras 2 s aparece una kill nuestra y luego una doble kill.
     let t0 = std::time::Instant::now();

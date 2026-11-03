@@ -22,9 +22,20 @@ Grabador de partidas y clips para Windows, al estilo de Outplayed, diseñado par
 
 Es la misma técnica que usan ShadowPlay y OBS con NVENC.
 
+## Actualizaciones automáticas
+
+ClipLite se actualiza solo. Cada vez que se publica una versión nueva en GitHub (pestaña **Releases** del repositorio):
+
+1. ClipLite la detecta (30 s después de abrirse y luego cada 6 horas) y la descarga en segundo plano.
+2. Comprueba su huella SHA-256; si no coincide, la descarta.
+3. Aparece el aviso **"Hay una actualización nueva"**, en la bandeja y en la ventana de ClipLite. Haz clic en él o en **Actualizar ahora** y ClipLite se reinicia ya actualizado.
+4. Si no haces nada, se instala sola la próxima vez que se abra ClipLite. Nunca se instala a mitad de una grabación.
+
+Se puede desactivar en Configuración › General, y buscar a mano con "Buscar actualizaciones".
+
 ## Instalación
 
-**Opción A — sin instalar nada (recomendada):** sube esta carpeta a un repositorio de GitHub. En la pestaña **Actions** se compila sola y genera `ClipLite-Windows.zip` con `ClipLite.exe` y `ffmpeg.exe` ya incluidos. Descomprímelo y abre `ClipLite.exe`.
+**Opción A — sin compilar nada (recomendada):** descarga `ClipLite-Windows.zip` de la última versión en la pestaña **Releases** del repositorio. Trae `ClipLite.exe` y `ffmpeg.exe`. Descomprímelo en una carpeta tuya (por ejemplo, `Documentos\ClipLite`; no en "Archivos de programa", para que pueda actualizarse) y abre `ClipLite.exe`.
 
 **Opción B — compilar en tu PC:**
 1. Instala Rust desde https://rustup.rs (acepta las opciones por defecto).
@@ -68,7 +79,7 @@ Kills seguidas se unen en un único clip con la etiqueta del mejor momento (por 
 
 ## Configuración
 
-`%APPDATA%\ClipLite\config.ini` (menú → Editar configuración). Todo está comentado. Lo más útil:
+Clic derecho en el icono › **Configuración…** abre una ventana con todos los ajustes; se guardan solos al cambiarlos. Por debajo se guardan en `%APPDATA%\ClipLite\config.ini`, que también se puede editar a mano (después: menú › Recargar configuración). Lo más útil:
 
 | Clave | Por defecto | |
 |---|---|---|
@@ -173,6 +184,7 @@ Si no quieres que se abra solo, pon `abrir_reproductor = no` en la configuració
 | `events.rs` | detección de momentos de LoL y CS2 |
 | `library.rs`, `player.html` | biblioteca de partidas y reproductor |
 | `server.rs` | servidor local del reproductor: vídeos, mezcla de pistas y copias |
+| `update.rs` | actualizaciones automáticas: consulta, descarga, SHA-256 |
 | `editor.rs` | editor: convierte el proyecto en una orden de FFmpeg, exporta en segundo plano |
 | `config.rs`, `json.rs`, `util.rs`, `log.rs` | utilidades |
 | `headless.rs` | banco de pruebas que simula una partida (solo fuera de Windows) |

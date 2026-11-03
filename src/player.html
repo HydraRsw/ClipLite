@@ -122,6 +122,11 @@ video#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;back
 .row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border:0}
 .panel p{color:var(--dim);font-size:13px;margin:8px 0}
+/* aviso de actualización */
+.updbar{position:fixed;right:18px;bottom:18px;z-index:50;display:flex;align-items:center;gap:12px;background:#1f2a22;border:1px solid #3e7a52;color:#e9f7ee;border-radius:12px;padding:12px 14px;box-shadow:0 8px 30px #0008;max-width:520px;font-size:14px}
+.updbar b{color:#fff}
+.updbar .chip{background:#2f8a52;border-color:#2f8a52;color:#fff;font-weight:600}
+.updbar .x{color:#9bb;font-size:18px;padding:0 4px}
 /* ajustes */
 .cfg{grid-template-columns:repeat(auto-fill,minmax(420px,1fr))}
 .cfgrow{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line)}
@@ -779,6 +784,29 @@ $("#navCfg").onclick = () => { st.view = "cfg"; render(); };
 $("#navSpace").onclick = () => { st.view = "space"; if (video) video.pause(); render(); };
 $("#navFav").onclick = () => { st.view = "fav"; if (video) video.pause(); render(); };
 
+// ============================================================= ACTUALIZACIONES
+function showUpdate(u) {
+  if (!u || !u.available || $("#updbar")) return;
+  try { if (sessionStorage.getItem("cliplite.upd.later") === u.version) return; } catch (e) {}
+  const bar = h("div", { class: "updbar", id: "updbar" },
+    h("div", {}, "⬆ ", h("b", {}, "Hay una actualización nueva"), ` — ClipLite ${u.version}`,
+      u.notes ? h("div", { style: "font-size:12px;opacity:.8;margin-top:3px" }, u.notes.split("\n")[0].slice(0, 120)) : null),
+    h("button", { class: "chip", onclick: installUpdate }, "Actualizar ahora"),
+    h("button", { class: "x", title: "Más tarde (se instalará al volver a abrir ClipLite)", onclick: () => { try { sessionStorage.setItem("cliplite.upd.later", u.version); } catch (e) {} bar.remove(); } }, "×"));
+  document.body.append(bar);
+}
+async function installUpdate() {
+  const bar = $("#updbar");
+  if (bar) bar.innerHTML = "<div>⏳ Instalando la actualización… ClipLite se reiniciará en unos segundos. Si estás grabando, se instalará al terminar la partida.</div>";
+  const before = (await api("update", {}).catch(() => ({}))).current;
+  await api("update_install", {}).catch(() => {});
+  for (let i = 0; i < 40; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try { const u = await api("update", {}); if (u.current && u.current !== before) { location.reload(); return; } } catch (e) {}
+  }
+}
+if (API) setTimeout(() => api("update", {}).then(showUpdate).catch(() => {}), 1500);
+
 // ============================================================= AJUSTES
 let cfgData = null, cfgTimer = null;
 
@@ -914,6 +942,12 @@ async function renderSettings(main) {
       row("Iniciar ClipLite con Windows", null, h("label", { class: "sw" }, h("input", { type: "checkbox", checked: cfgData.autostart ? "" : false, onchange: e => { cfgData.autostart = e.target.checked; save(); } }), h("span"))),
       row("Abrir el reproductor al terminar la partida", null, toggle("abrir_reproductor")),
       row("Actualizarse automáticamente", "Te avisa cuando hay versión nueva", toggle("actualizaciones_automaticas")),
+      row("Versión " + cfgData.version, null, h("button", { class: "chip", onclick: async e => {
+        e.target.textContent = "Buscando…";
+        await api("update_check", {});
+        for (let i = 0; i < 20; i++) { await new Promise(r => setTimeout(r, 1500)); const u = await api("update", {}); if (u.available) { showUpdate(u); e.target.textContent = "Hay versión nueva"; return; } }
+        e.target.textContent = "Está al día";
+      } }, "Buscar actualizaciones")),
       row("Ver mis clips desde el móvil", "Por la Wi-Fi de casa, con código QR", toggle("acceso_movil")),
       row("Sonido al empezar y guardar", null, toggle("sonido")),
       row("Avisos en pantalla", null, toggle("notificaciones")),

@@ -164,6 +164,7 @@ extern "system" {
     fn WaitForSingleObject(h: H, ms: u32) -> u32;
     fn SetEvent(h: H) -> BOOL;
     fn SetThreadPriority(h: H, p: i32) -> BOOL;
+    fn ReleaseMutex(h: H) -> BOOL;
     fn GetCurrentThread() -> H;
 }
 #[link(name = "ole32")]
@@ -190,6 +191,7 @@ extern "system" {
     fn WinHttpQueryDataAvailable(h: H, avail: *mut u32) -> BOOL;
     fn WinHttpReadData(h: H, buf: *mut c_void, len: u32, read: *mut u32) -> BOOL;
     fn WinHttpCloseHandle(h: H) -> BOOL;
+    fn WinHttpQueryHeaders(h: H, level: u32, name: *const u16, buf: *mut c_void, len: *mut u32, index: *mut u32) -> BOOL;
 }
 
 // HKEY_CURRENT_USER es un LONG con signo extendido a puntero.
@@ -226,6 +228,8 @@ const ID_AUTOSTART: usize = 40;
 const ID_CLEAN: usize = 50; // 50..=54
 const CLEAN_OPTIONS: [(u32, &str); 5] = [(0, "Nunca"), (7, "Más de 7 días"), (14, "Más de 14 días"), (30, "Más de 30 días"), (90, "Más de 90 días")];
 const ID_QUIT: usize = 99;
+const ID_UPDATE: usize = 60;
+const ID_CHECKUPD: usize = 61;
 
 fn w(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -566,6 +570,130 @@ fn http_get(h: &Http, path: &str) -> Option<String> {
         }
         WinHttpCloseHandle(req);
         ok.then(|| String::from_utf8_lossy(&out).into_owned())
+    }
+}
+
+// ------------------------------------------------------------------ HTTPS (actualizaciones)
+
+fn split_url(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("https://")?;
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    Some((host.to_string(), format!("/{path}")))
+}
+
+/// Petición GET por HTTPS (usa la configuración de proxy de Windows y valida el certificado).
+/// Envía cada bloque recibido a `sink`.
+fn https_fetch(url: &str, sink: &mut dyn FnMut(&[u8]) -> Result<(), String>) -> Result<(), String> {
+    let (host, path) = split_url(url).ok_or("dirección no válida")?;
+    unsafe {
+        let ua = w(&format!("ClipLite/{}", crate::util::VERSION));
+        let mut session = WinHttpOpen(ua.as_ptr(), 4 /* AUTOMATIC_PROXY (Win 8.1+) */, null(), null(), 0);
+        if session == 0 {
+            session = WinHttpOpen(ua.as_ptr(), 0 /* DEFAULT_PROXY */, null(), null(), 0);
+        }
+        if session == 0 {
+            return Err("WinHttpOpen".into());
+        }
+        WinHttpSetTimeouts(session, 15_000, 15_000, 30_000, 60_000);
+        let conn = WinHttpConnect(session, w(&host).as_ptr(), 443, 0);
+        let req = if conn != 0 {
+            WinHttpOpenRequest(conn, w("GET").as_ptr(), w(&path).as_ptr(), null(), null(), null(), 0x0080_0000 /* SECURE */)
+        } else {
+            0
+        };
+        let close = || {
+            if req != 0 {
+                WinHttpCloseHandle(req);
+            }
+            if conn != 0 {
+                WinHttpCloseHandle(conn);
+            }
+            WinHttpCloseHandle(session);
+        };
+        if req == 0 {
+            close();
+            return Err("no se pudo conectar".into());
+        }
+        let headers = w("Accept: application/vnd.github+json\r\n");
+        if WinHttpSendRequest(req, headers.as_ptr(), u32::MAX, null(), 0, 0, 0) == 0 || WinHttpReceiveResponse(req, null_mut()) == 0 {
+            let e = GetLastError();
+            close();
+            return Err(format!("sin conexión con GitHub (error {e})"));
+        }
+        let mut code: u32 = 0;
+        let mut len: u32 = 4;
+        WinHttpQueryHeaders(req, 19 | 0x2000_0000 /* STATUS_CODE | FLAG_NUMBER */, null(), &mut code as *mut u32 as *mut c_void, &mut len, null_mut());
+        if code != 200 {
+            close();
+            return Err(format!("GitHub respondió {code}"));
+        }
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut result = Ok(());
+        loop {
+            let mut read = 0u32;
+            if WinHttpReadData(req, buf.as_mut_ptr() as *mut c_void, buf.len() as u32, &mut read) == 0 {
+                result = Err("la descarga se cortó".into());
+                break;
+            }
+            if read == 0 {
+                break;
+            }
+            if let Err(e) = sink(&buf[..read as usize]) {
+                result = Err(e);
+                break;
+            }
+        }
+        close();
+        result
+    }
+}
+
+pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    https_fetch(url, &mut |b| {
+        if out.len() > 8 << 20 {
+            return Err("respuesta demasiado grande".into());
+        }
+        out.extend_from_slice(b);
+        Ok(())
+    })?;
+    Ok(out)
+}
+
+pub fn https_download(url: &str, dest: &Path) -> Result<(), String> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    let mut total = 0usize;
+    https_fetch(url, &mut |b| {
+        total += b.len();
+        if total > 200 << 20 {
+            return Err("archivo demasiado grande".into());
+        }
+        f.write_all(b).map_err(|e| e.to_string())
+    })
+}
+
+/// Sustituye este ClipLite.exe por la versión nueva y la abre. Un programa en uso no se puede
+/// sobrescribir, pero sí renombrar: el actual pasa a ClipLite.old.exe (lo borra la versión nueva).
+pub fn apply_update(new_exe: &Path) -> Result<(), String> {
+    let cur = std::env::current_exe().map_err(|e| e.to_string())?;
+    let old = cur.with_file_name("ClipLite.old.exe");
+    let _ = std::fs::remove_file(&old);
+    std::fs::rename(&cur, &old).map_err(|e| format!("no se pudo reemplazar el programa ({e}); ¿está en una carpeta protegida?"))?;
+    if let Err(e) = std::fs::copy(new_exe, &cur) {
+        let _ = std::fs::rename(&old, &cur);
+        return Err(format!("no se pudo copiar la versión nueva: {e}"));
+    }
+    match std::process::Command::new(&cur).arg("--actualizado").spawn() {
+        Ok(_) => {
+            log!("Actualización instalada; abriendo la versión nueva");
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&cur);
+            let _ = std::fs::rename(&old, &cur);
+            Err(format!("no se pudo abrir la versión nueva: {e}"))
+        }
     }
 }
 
@@ -953,6 +1081,8 @@ struct Ctx {
 
 static CTX: OnceLock<Ctx> = OnceLock::new();
 static GAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// El último aviso de la bandeja es el de "hay actualización" (al hacer clic, se instala).
+static BALLOON_IS_UPDATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn ctx() -> &'static Ctx {
     CTX.get().expect("ctx")
@@ -1089,6 +1219,9 @@ unsafe fn show_menu(hwnd: H) {
     add(0x10 /* MF_POPUP */, sub as usize, "Borrar vídeos viejos automáticamente");
     add(check(autostart_enabled()), ID_AUTOSTART, "Iniciar con Windows");
     add(MF_SEPARATOR, 0, "");
+    add(0, ID_CHECKUPD, "Buscar actualizaciones");
+    add(MF_GRAYED, 4, &format!("Versión {}", crate::util::VERSION));
+    add(MF_SEPARATOR, 0, "");
     add(0, ID_QUIT, "Salir");
 
     let mut p = POINT { x: 0, y: 0 };
@@ -1124,6 +1257,8 @@ unsafe fn show_menu(hwnd: H) {
         ID_AUTOSTART => set_autostart(!autostart_enabled()),
         x if (ID_CLEAN..ID_CLEAN + CLEAN_OPTIONS.len()).contains(&x) => send(Cmd::SetCleanDays(CLEAN_OPTIONS[x - ID_CLEAN].0)),
         ID_QUIT => send(Cmd::Quit),
+        ID_UPDATE => send(Cmd::InstallUpdate),
+        ID_CHECKUPD => send(Cmd::CheckUpdates(true)),
         _ => {}
     }
 }
@@ -1133,7 +1268,9 @@ unsafe extern "system" fn wndproc(hwnd: H, msg: u32, wparam: usize, lparam: isiz
     match msg {
         WM_TRAY => {
             let ev = (lparam as u32) & 0xFFFF;
-            if ev == WM_RBUTTONUP || ev == WM_LBUTTONUP {
+            if ev == 0x405 /* NIN_BALLOONUSERCLICK */ && BALLOON_IS_UPDATE.load(Ordering::SeqCst) {
+                send(Cmd::InstallUpdate);
+            } else if ev == WM_RBUTTONUP || ev == WM_LBUTTONUP {
                 show_menu(hwnd);
             } else if ev == 0x0203 {
                 // doble clic: abrir el reproductor
@@ -1172,7 +1309,14 @@ unsafe extern "system" fn wndproc(hwnd: H, msg: u32, wparam: usize, lparam: isiz
                     UiMsg::Notice(s) if s.is_empty() => {
                         MessageBeep(0);
                     }
-                    UiMsg::Notice(s) => tray(NIM_MODIFY, Some(&s)),
+                    UiMsg::Notice(s) => {
+                        BALLOON_IS_UPDATE.store(false, Ordering::SeqCst);
+                        tray(NIM_MODIFY, Some(&s))
+                    }
+                    UiMsg::UpdateReady(msg) => {
+                        tray(NIM_MODIFY, Some(&msg));
+                        BALLOON_IS_UPDATE.store(true, Ordering::SeqCst);
+                    }
                     UiMsg::Exit => {
                         DestroyWindow(hwnd);
                     }
@@ -1231,11 +1375,26 @@ fn message_box(text: &str, flags: u32) -> i32 {
 }
 
 pub fn run() {
+    let just_updated = std::env::args().any(|a| a == "--actualizado");
+    let mutex;
     unsafe {
-        CreateMutexW(null(), 1, w("Local\\ClipLite.UnicaInstancia").as_ptr());
-        if GetLastError() == 183 {
-            message_box("ClipLite ya está abierto.\nBúscalo en los iconos junto al reloj.", 0x40);
-            return;
+        // Tras actualizar, la versión anterior tarda unos segundos en cerrarse: esperarla.
+        let mut tries = if just_updated { 60 } else { 1 };
+        loop {
+            let m = CreateMutexW(null(), 1, w("Local\\ClipLite.UnicaInstancia").as_ptr());
+            if GetLastError() != 183 {
+                mutex = m;
+                break;
+            }
+            CloseHandle(m);
+            tries -= 1;
+            if tries == 0 {
+                if !just_updated {
+                    message_box("ClipLite ya está abierto.\nBúscalo en los iconos junto al reloj.", 0x40);
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(500));
         }
         // Nuestro proceso cede la CPU al juego. (FFmpeg sigue en prioridad normal.)
         SetPriorityClass(GetCurrentProcess(), 0x4000 /* BELOW_NORMAL */);
@@ -1249,7 +1408,34 @@ pub fn run() {
     let cfg_path = crate::config::config_path();
     let first_run = !cfg_path.exists();
     let cfg = Config::load_or_create(&cfg_path);
-    log!("ClipLite {} iniciado", env!("CARGO_PKG_VERSION"));
+    log!("ClipLite {} iniciado", crate::util::VERSION);
+
+    // Actualizaciones: borrar el programa anterior y, si hay una versión nueva ya descargada,
+    // instalarla ahora (antes de empezar a grabar nada).
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::fs::remove_file(exe.with_file_name("ClipLite.old.exe"));
+    }
+    if just_updated {
+        crate::update::clear();
+    } else if cfg.auto_update {
+        if let Some(r) = crate::update::load_pending() {
+            log!("Instalando la actualización pendiente {}", r.version);
+            unsafe {
+                ReleaseMutex(mutex);
+                CloseHandle(mutex);
+            }
+            match apply_update(&r.file) {
+                Ok(()) => return,
+                Err(e) => {
+                    log!("No se pudo instalar la actualización: {e}");
+                    crate::update::clear();
+                    unsafe {
+                        CreateMutexW(null(), 1, w("Local\\ClipLite.UnicaInstancia").as_ptr());
+                    }
+                }
+            }
+        }
+    }
 
     let Some(ffmpeg) = crate::util::find_ffmpeg(&cfg.ffmpeg) else {
         let r = message_box(
@@ -1316,7 +1502,9 @@ pub fn run() {
         tray(NIM_ADD, None);
 
         let failed = register_hotkeys(hwnd, &cfg);
-        if !failed.is_empty() {
+        if just_updated {
+            tray(NIM_MODIFY, Some(&format!("ClipLite se actualizó a la versión {}", crate::util::VERSION)));
+        } else if !failed.is_empty() {
             tray(NIM_MODIFY, Some(&format!("No se pudo usar el atajo {} (¿lo usa otro programa?). Cámbialo en la configuración.", failed.join(", "))));
         } else if first_run {
             tray(

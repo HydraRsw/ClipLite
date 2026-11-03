@@ -23,6 +23,7 @@ struct Srv {
     token: String,
     root: Mutex<PathBuf>,
     ffmpeg: PathBuf,
+    tx: Mutex<std::sync::mpsc::Sender<crate::controller::Cmd>>,
 }
 
 static SRV: OnceLock<Srv> = OnceLock::new();
@@ -37,12 +38,28 @@ fn random_hex() -> String {
     out
 }
 
+/// Clave de acceso: se guarda para que la ventana abierta siga funcionando tras reiniciar o
+/// actualizar ClipLite. Se puede regenerar borrando el archivo.
+fn load_token() -> String {
+    let path = crate::platform::config_dir().join("clave.txt");
+    if let Ok(t) = std::fs::read_to_string(&path) {
+        let t = t.trim().to_string();
+        if t.len() >= 32 && t.chars().all(|c| c.is_ascii_hexdigit()) {
+            return t;
+        }
+    }
+    let t = random_hex();
+    let _ = std::fs::create_dir_all(crate::platform::config_dir());
+    let _ = std::fs::write(&path, &t);
+    t
+}
+
 /// Arranca el servidor en un puerto fijo (para que los favoritos del reproductor se conserven).
-pub fn start(root: PathBuf, ffmpeg: PathBuf) {
+pub fn start(root: PathBuf, ffmpeg: PathBuf, tx: std::sync::mpsc::Sender<crate::controller::Cmd>) {
     for port in 47380..47400u16 {
         let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) else { continue };
         let _ = std::fs::remove_dir_all(root.join(".cliplite").join("tmp"));
-        let _ = SRV.set(Srv { port, token: random_hex(), root: Mutex::new(root), ffmpeg });
+        let _ = SRV.set(Srv { port, token: load_token(), root: Mutex::new(root), ffmpeg, tx: Mutex::new(tx) });
         std::thread::Builder::new()
             .name("servidor".into())
             .spawn(move || {
@@ -186,6 +203,26 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
         // Acciones que no necesitan un archivo existente.
         match api {
             "edit" => return edit_start(&mut stream, srv, &root, &body),
+            "update" => {
+                let r = crate::update::ready();
+                return json(
+                    &mut stream,
+                    Json::Obj(vec![
+                        ("current".into(), Json::str(util::VERSION)),
+                        ("available".into(), Json::Bool(r.is_some())),
+                        ("version".into(), r.as_ref().map(|r| Json::str(&r.version)).unwrap_or(Json::Null)),
+                        ("notes".into(), r.as_ref().map(|r| Json::str(&r.notes)).unwrap_or(Json::Null)),
+                    ]),
+                );
+            }
+            "update_install" => {
+                let _ = srv.tx.lock().unwrap().send(crate::controller::Cmd::InstallUpdate);
+                return json(&mut stream, Json::Obj(vec![("ok".into(), Json::Bool(true))]));
+            }
+            "update_check" => {
+                let _ = srv.tx.lock().unwrap().send(crate::controller::Cmd::CheckUpdates(true));
+                return json(&mut stream, Json::Obj(vec![("ok".into(), Json::Bool(true))]));
+            }
             "config" if method == "POST" => return config_save(&mut stream, &body),
             "config" => {
                 let cfg = crate::config::Config::load_or_create(&crate::config::config_path());
