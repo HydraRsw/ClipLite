@@ -3,3 +3,8 @@
 /cliplite_out
 ClipLite.exe
 ffmpeg.exe
+/android/clave.jks
+/android/.gradle
+/android/build
+/android/app/build
+/android/local.properties

@@ -1,5 +1,5 @@
-# Compila ClipLite en los servidores de GitHub y publica una versión nueva (Releases).
-# La app instalada la detecta, la descarga, comprueba su huella SHA-256 y se actualiza sola.
+# Compila ClipLite (Windows y Android) en los servidores de GitHub y publica una versión nueva
+# (Releases). Las apps instaladas la detectan, la descargan, comprueban su huella SHA-256 y se actualizan.
 name: Compilar ClipLite
 
 on:
@@ -49,9 +49,62 @@ jobs:
           name: publicar-windows
           path: publicar
 
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Clave de firma
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          # La clave oficial vive en un secreto del repositorio (Settings > Secrets > Actions).
+          # Sin ella se compila igualmente para comprobar que todo funciona, pero el APK no se publica:
+          # Android solo acepta actualizaciones firmadas siempre con la misma clave.
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            echo "$ANDROID_KEYSTORE" | base64 -d > android/clave.jks
+            echo "FIRMA=oficial" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -keystore android/clave.jks -storetype PKCS12 -alias cliplite -keyalg RSA -keysize 2048 \
+              -validity 30 -storepass cliplite-android -keypass cliplite-android -dname "CN=ClipLite prueba"
+            echo "FIRMA=temporal" >> "$GITHUB_ENV"
+            echo "::warning::Falta el secreto ANDROID_KEYSTORE: el APK se compila pero no se publica."
+          fi
+
+      - name: Compilar APK
+        working-directory: android
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace \
+            -PversionName="$CLIPLITE_VERSION" -PversionCode="${{ github.run_number }}"
+          mkdir -p ../dist-android ../publicar
+          cp app/build/outputs/apk/release/app-release.apk ../dist-android/ClipLite-Android.apk
+          if [ "$FIRMA" = "oficial" ]; then cp ../dist-android/ClipLite-Android.apk ../publicar/; fi
+          ls -la ../dist-android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipLite-Android
+          path: dist-android
+
+      - uses: actions/upload-artifact@v4
+        if: env.FIRMA == 'oficial'
+        with:
+          name: publicar-android
+          path: publicar
+
   publicar:
-    needs: [windows]
-    if: github.ref == 'refs/heads/main'
+    needs: [windows, android]
+    # Si la app Android fallara, la versión de PC se publica igualmente.
+    if: always() && github.ref == 'refs/heads/main' && needs.windows.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
