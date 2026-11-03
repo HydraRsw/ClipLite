@@ -19,8 +19,8 @@ xml = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
 pat = re.compile(sys.argv[2], re.I)
 for node in re.finditer(r'<node [^>]*>', xml):
     n = node.group(0)
-    t = re.search(r' text="([^"]*)"', n); d = re.search(r'content-desc="([^"]*)"', n)
-    txt = (t.group(1) if t else "") + " " + (d.group(1) if d else "")
+    t = re.search(r' text="([^"]*)"', n); d = re.search(r'content-desc="([^"]*)"', n); r = re.search(r'resource-id="([^"]*)"', n)
+    txt = (t.group(1) if t else "") + " " + (d.group(1) if d else "") + " id:" + (r.group(1) if r else "")
     if pat.search(txt):
         b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
         if b:
@@ -31,6 +31,12 @@ PY
     sleep 1.5
   done
   log "NO encontrado «$1»"; return 1
+}
+# Botón "Start now" del permiso de captura (botón positivo del diálogo del sistema).
+start_now() {
+  tap "id:android:id/button1" || tap "Start now|Empezar ahora|Iniciar ahora|Comenzar ahora" || {
+    log "uso el teclado para aceptar"; adb shell input keyevent 61; adb shell input keyevent 61; adb shell input keyevent 66; }
+  cp "$OUT/ui.xml" "$OUT/ui_permiso.xml" 2>/dev/null
 }
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; log "captura $1"; }
 
@@ -43,7 +49,7 @@ adb shell appops set $PKG SYSTEM_ALERT_WINDOW allow
 # Que el emulador reproduzca sonido mientras graba (tono), para comprobar el audio interno.
 log "abrir app"; adb shell am start -W -n $PKG/.MainActivity; sleep 4; shot 1_inicio
 tap "Empezar a grabar"; sleep 3; shot 2_permiso
-tap "^(Start now|Empezar ahora|Iniciar ahora|Start)$" || tap "Start|Iniciar|Empezar"
+start_now
 sleep 8; shot 3_grabando
 adb shell dumpsys notification --noredact | grep -A2 "ClipLite" | grep -E "text=|android.text" | head -3
 log "guardar clip (botón de la app)"; tap "Guardar clip ahora"; sleep 9; shot 4_clip
@@ -58,7 +64,7 @@ log "--- modo partida completa"
 adb shell input swipe 500 1500 500 600 300; sleep 1
 tap "Partida completa \+ clips"; adb shell input swipe 500 600 500 1500 300; sleep 1
 tap "Empezar a grabar"; sleep 3
-tap "^(Start now|Empezar ahora|Iniciar ahora|Start)$" || tap "Start|Iniciar|Empezar"
+start_now
 sleep 12; tap "Detener grabación"; sleep 6; shot 6_lista
 for f in $(adb shell ls /sdcard/Movies/ClipLite/ 2>/dev/null | tr -d '\r'); do
   [ -f "$OUT/$f" ] || { adb pull "/sdcard/Movies/ClipLite/$f" "$OUT/$f" >/dev/null && log "descargado $f"; }

@@ -146,7 +146,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd resultado || exit 0
-          rm -f *.mp4 ui.xml
+          rm -f *.mp4
           for p in *.png; do [ -f "$p" ] && ffmpeg -v error -y -i "$p" -vf "scale='min(540,iw)':-1" "small_$p" && mv "small_$p" "$p"; done
           git init -q . && git checkout -q -b pruebas-android
           git -c user.name="ClipLite CI" -c user.email="ci@invalid" add -A
